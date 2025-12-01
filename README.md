@@ -1,6 +1,10 @@
 # Open PTC Agent
 
-[Getting Started](#getting-started) | [Configuration](docs/CONFIGURATION.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![GitHub stars](https://img.shields.io/github/stars/Chen-zexi/open-ptc-agent?style=social)](https://github.com/Chen-zexi/open-ptc-agent/stargazers)
+
+[Getting Started](#getting-started) | [Demo Notebooks](#demo-notebooks) | [Configuration](docs/CONFIGURATION.md) | [Changelog](docs/CHANGELOG.md) | [Roadmap](#roadmap)
 
 ## What is Programmatic Tool Calling?
 
@@ -38,6 +42,13 @@ User Task
 |Final deliverables |  Files and data can be downloaded from sandbox
 +-------------------+
 ```
+
+## What's New
+
+- **Background Subagent Execution** - Subagents now run asynchronously using a "waiting room" pattern, allowing the main agent to continue working while delegated tasks execute in the background
+- **Vision/Multimodal Support** - New `view_image` tool enables vision-capable LLMs to analyze images from URLs, base64 data, or sandbox files
+- **Task Monitoring** - New `wait()` and `check_task_progress()` tools for monitoring and collecting background task results
+
 ## Features
 
 - **Universal MCP Support** - Auto-converts any MCP server tools to Python functions
@@ -65,7 +76,8 @@ User Task
 │       ├── config.py          # AgentConfig
 │       ├── tools/             # Native tool implementations
 │       ├── prompts/           # Jinja2 templates
-│       ├── subagents/         # Research & general subagents
+│       ├── subagents/         # Research & general-purpose subagents
+│       ├── middleware/        # Background execution, vision support
 │       └── backends/          # DaytonaBackend
 │
 ├── mcp_servers/               # Custom MCP server implementations for demo purposes
@@ -79,7 +91,7 @@ User Task
 
 ## Native Tools
 
-The agent has access to 7 native tools plus some built-in middleware capabilities from [deep-agent](https://github.com/langchain-ai/deepagents):
+The agent has access to native tools plus middleware capabilities from [deep-agent](https://github.com/langchain-ai/deepagents):
 
 ### Core Tools
 
@@ -98,13 +110,17 @@ The agent has access to 7 native tools plus some built-in middleware capabilitie
 | Middleware | Description | Tools Provided |
 |------------|-------------|----------------|
 | **SubagentsMiddleware** | Delegates specialized tasks to sub-agents with isolated execution | `task()` |
-| **FilesystemMiddleware** | File operations | `read_file`, `write_file`, `edit_file`, `glob`, `grep`, `ls`, `bash` |
+| **BackgroundSubagentMiddleware** | Async subagent execution with waiting room pattern | `wait()`, `check_task_progress()` |
+| **ViewImageMiddleware** | Injects images into conversation for multimodal LLMs | `view_image()` |
+| **FilesystemMiddleware** | File operations | `read_file`, `write_file`, `edit_file`, `glob`, `grep`, `ls` |
 | **TodoListMiddleware** | Task planning and progress tracking (auto-enabled) | `write_todos` |
 | **SummarizationMiddleware** | Auto-summarizes conversation history (auto-enabled) | - |
 
 **Available Subagents:**
 - `research` - Web search with Tavily + think tool for strategic reflection
-- `general` - General purpose with full execute_code and filesystem access
+- `general-purpose` - Full execute_code, filesystem, and vision tools for complex multi-step tasks
+
+Subagents run in the background by default - the main agent can continue working while delegated tasks execute asynchronously.
 
 Note: For better tool discovery, I override the built-in filesystem middleware from langchain deep-agent. You can disable it by setting `use_custom_filesystem_tools` to false in `config.yaml`.
 
@@ -215,9 +231,10 @@ See `.env.example` for the complete list of configuration options.
 
 ### Demo Notebooks
 
-Quick start with the jupyter notebook:
+Quick start with the jupyter notebooks:
 
 - **PTC_Agent.ipynb** - Quick demo with open-ptc-agent
+- **example/Subagent_demo.ipynb** - Background subagent execution with research and general-purpose agents
 
 Optionally, you can use the langgraph api to deploy the agent.
 
@@ -248,6 +265,29 @@ mcp:
 
 For complete configuration options including Daytona settings, security policies, and adding custom LLM providers, see the [Configuration Guide](docs/CONFIGURATION.md).
 
+## Roadmap
+
+Planned features and improvements:
+
+- [ ] CI/CD pipeline for automated testing
+- [ ] Additional MCP server integrations / More example notebooks
+- [ ] Performance benchmarks and optimizations
+- [ ] Improved search tool for smoother tool discovery
+- [ ] Claude skill integration
+- [ ] DeepAgents CLI integration (Need further investigation to see if it is possible)
+
+## Contributing
+
+We welcome contributions from the community! Here are some ways you can help:
+
+- **Code Contributions** - Bug fixes, new features, improvements (CI/CD coming soon)
+- **Use Cases** - Share how you're using PTC in production or research
+- **Example Notebooks** - Create demos showcasing different workflows
+- **MCP Servers** - Build or recommend MCP servers that work well with PTC (data processing, APIs, etc.)
+- **Prompt Tricks** - Share prompting techniques that improve agent performance
+
+Open an issue or PR on [GitHub](https://github.com/Chen-zexi/open-ptc-agent) to contribute!
+
 ## Acknowledgements
 
 This project builds on research and tools from:
@@ -260,8 +300,14 @@ This project builds on research and tools from:
 
 **Frameworks and Infrastructure**
 
-- [LangChain DeepAgent](https://github.com/langchain-ai/deep-agent) - Base Agent Framework
+- [LangChain DeepAgents](https://github.com/langchain-ai/deepagents) - Base Agent Framework
 - [Daytona](https://www.daytona.io/) - Sandbox infrastructure
+
+## Star History
+
+If you find this project useful, please consider giving it a star! It helps others discover this work.
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Chen-zexi/open-ptc-agent&type=Date)](https://star-history.com/#Chen-zexi/open-ptc-agent&Date)
 
 ## License
 
