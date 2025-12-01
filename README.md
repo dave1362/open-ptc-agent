@@ -47,9 +47,9 @@ User Task
 
 ## What's New
 
-- **Background Subagent Execution** - Subagents now run asynchronously using a "waiting room" pattern, allowing the main agent to continue working while delegated tasks execute in the background
+- **Background Subagent Execution** - Subagents now run asynchronously using a "fire and collect" pattern, giving the agent proactive control over dispatched tasks. Results are automatically returned to the agent upon completion, even without explicitly calling `wait()`
 - **Vision/Multimodal Support** - New `view_image` tool enables vision-capable LLMs to analyze images from URLs, base64 data, or sandbox files
-- **Task Monitoring** - New `wait()` and `check_task_progress()` tools for monitoring and collecting background task results
+- **Task Monitoring** - New `wait()` and `task_progress()` tools for monitoring and collecting background task results
 
 ## Features
 
@@ -112,7 +112,7 @@ The agent has access to native tools plus middleware capabilities from [deep-age
 | Middleware | Description | Tools Provided |
 |------------|-------------|----------------|
 | **SubagentsMiddleware** | Delegates specialized tasks to sub-agents with isolated execution | `task()` |
-| **BackgroundSubagentMiddleware** | Async subagent execution with waiting room pattern | `wait()`, `check_task_progress()` |
+| **BackgroundSubagentMiddleware** | Async subagent execution with fire and collect pattern | `wait()`, `task_progress()` |
 | **ViewImageMiddleware** | Injects images into conversation for multimodal LLMs | `view_image()` |
 | **FilesystemMiddleware** | File operations | `read_file`, `write_file`, `edit_file`, `glob`, `grep`, `ls` |
 | **TodoListMiddleware** | Task planning and progress tracking (auto-enabled) | `write_todos` |

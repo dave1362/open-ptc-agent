@@ -12,7 +12,7 @@ from src.agent.middleware.background import (
     BackgroundSubagentOrchestrator,
     ToolCallCounterMiddleware,
     create_wait_tool,
-    create_check_task_progress_tool,
+    create_task_progress_tool,
 )
 from src.agent.middleware.view_image_middleware import (
     ViewImageMiddleware,
@@ -28,7 +28,7 @@ __all__ = [
     "BackgroundSubagentOrchestrator",
     "ToolCallCounterMiddleware",
     "create_wait_tool",
-    "create_check_task_progress_tool",
+    "create_task_progress_tool",
     # Vision/image handling
     "ViewImageMiddleware",
     "create_view_image_tool",

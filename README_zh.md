@@ -49,9 +49,9 @@ User Task
 
 ## 最新更新
 
-- **后台子Agent执行** - 子Agent现在使用"waiting room"模式异步运行，允许主Agent在委托任务执行时继续工作或者主动等待子Agent完成任务
+- **后台子Agent执行** - 子Agent现在使用"fire and collect"模式异步运行，主Agent可主动控制任务分发时机。即使不显式调用 `wait()`，任务结果也会在完成后自动返回给Agent
 - **视觉/多模态支持** - 新增 `view_image` 工具，使具有视觉能力的 LLM 能够分析来自 URL、base64 数据或沙箱文件的图像
-- **任务监控** - 新增 `wait()` 和 `check_task_progress()` 工具，用于监控和收集后台任务结果
+- **任务监控** - 新增 `wait()` 和 `task_progress()` 工具，用于监控和收集后台任务结果
 
 ## 功能特性
 
@@ -114,7 +114,7 @@ Agent可以访问原生工具以及来自 [deep-agent](https://github.com/langch
 | 中间件 | 描述 | 提供的工具 |
 |--------|------|-----------|
 | **SubagentsMiddleware** | 将任务委托给具有隔离执行的子Agent | `task()` |
-| **BackgroundSubagentMiddleware** | 异步子Agent执行 | `wait()`, `check_task_progress()` |
+| **BackgroundSubagentMiddleware** | 异步子Agent执行（fire and collect 模式） | `wait()`, `task_progress()` |
 | **ViewImageMiddleware** | 将图像注入对话以供多模态 LLM 使用 | `view_image()` |
 | **FilesystemMiddleware** | 文件操作 | `read_file`, `write_file`, `edit_file`, `glob`, `grep`, `ls` |
 | **TodoListMiddleware** | 任务规划和进度跟踪（自动启用） | `write_todos` |

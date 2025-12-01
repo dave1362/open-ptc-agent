@@ -13,7 +13,7 @@ from src.agent.middleware.background.orchestrator import BackgroundSubagentOrche
 from src.agent.middleware.background.counter import ToolCallCounterMiddleware
 from src.agent.middleware.background.tools import (
     create_wait_tool,
-    create_check_task_progress_tool,
+    create_task_progress_tool,
 )
 
 __all__ = [
@@ -23,6 +23,6 @@ __all__ = [
     "BackgroundSubagentOrchestrator",
     "ToolCallCounterMiddleware",
     "create_wait_tool",
-    "create_check_task_progress_tool",
+    "create_task_progress_tool",
     "current_background_task_id",
 ]

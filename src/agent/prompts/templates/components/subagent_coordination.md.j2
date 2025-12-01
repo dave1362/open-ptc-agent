@@ -32,7 +32,7 @@ When you invoke subagents via the `task()` tool, they run in the **background** 
 
 1. **Immediate Response**: You receive confirmation with a Task ID (e.g., "Task-1 deployed")
 2. **Continue Working**: You can proceed with other tasks while subagents execute
-3. **Monitor Progress**: Use `check_task_progress()` to see subagent activity
+3. **Monitor Progress**: Use `task_progress()` to see subagent activity
 4. **Collect Results**: Use `wait()` or complete your work to trigger result collection
 5. **Synthesis**: Incorporate subagent results into your final response
 
@@ -43,14 +43,14 @@ When you invoke subagents via the `task()` tool, they run in the **background** 
 - Wait for all tasks: `wait()` - waits for all pending background tasks
 - Custom timeout: `wait(task_number=2, timeout=120)` - wait up to 2 minutes
 
-**`check_task_progress(task_number=None)`**
-- Check specific task: `check_task_progress(task_number=1)` - shows Task-1 status
-- Check all tasks: `check_task_progress()` - overview of all background tasks
+**`task_progress(task_number=None)`**
+- Check specific task: `task_progress(task_number=1)` - shows Task-1 status
+- Check all tasks: `task_progress()` - overview of all background tasks
 - Shows: status (running/completed), tool calls made, current activity, elapsed time
 
 ### Important Guidelines
 
-1. **Avoid Duplicate Assignments**: Before assigning a new task, check if a similar task is already running using `check_task_progress()`. Do not assign the same or overlapping tasks to multiple subagents.
+1. **Avoid Duplicate Assignments**: Before assigning a new task, check if a similar task is already running using `task_progress()`. Do not assign the same or overlapping tasks to multiple subagents.
 
 2. **Use Task IDs**: Reference subagents by their Task-N ID when checking progress or waiting for specific results.
 
@@ -67,7 +67,7 @@ User: "Research topics A, B, C and synthesize findings"
 1. task() -> Research topic A  → "Task-1 deployed"
 2. task() -> Research topic B  → "Task-2 deployed"
 3. task() -> Research topic C  → "Task-3 deployed"
-4. check_task_progress()       → Shows 3 tasks running
+4. task_progress()             → Shows 3 tasks running
 5. [Continue other work or wait...]
 6. wait()                      → Collects all results
 7. Synthesize findings into final response

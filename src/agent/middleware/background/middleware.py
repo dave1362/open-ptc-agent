@@ -26,7 +26,7 @@ from langgraph.types import Command
 from src.agent.middleware.background.registry import BackgroundTaskRegistry
 from src.agent.middleware.background.tools import (
     create_wait_tool,
-    create_check_task_progress_tool,
+    create_task_progress_tool,
 )
 
 logger = structlog.get_logger(__name__)
@@ -98,7 +98,7 @@ class BackgroundSubagentMiddleware(AgentMiddleware):
         # These allow the main agent to wait for and check on background tasks
         self.tools = [
             create_wait_tool(self),
-            create_check_task_progress_tool(self.registry),
+            create_task_progress_tool(self.registry),
         ]
 
     def wrap_tool_call(
@@ -206,7 +206,7 @@ class BackgroundSubagentMiddleware(AgentMiddleware):
             f"- Status: Running in background\n\n"
             f"You can:\n"
             f"- Continue with other work\n"
-            f"- Use `check_task_progress(task_number={task_number})` to monitor progress\n"
+            f"- Use `task_progress(task_number={task_number})` to monitor progress\n"
             f"- Use `wait(task_number={task_number})` to get results when ready\n"
             f"- Use `wait()` to wait for all background tasks"
         )

@@ -98,7 +98,7 @@ def create_wait_tool(middleware: "BackgroundSubagentMiddleware") -> StructuredTo
     )
 
 
-def create_check_task_progress_tool(registry: "BackgroundTaskRegistry") -> StructuredTool:
+def create_task_progress_tool(registry: "BackgroundTaskRegistry") -> StructuredTool:
     """Create tool to check background task progress.
 
     This tool allows the main agent to monitor the status and progress
@@ -111,7 +111,7 @@ def create_check_task_progress_tool(registry: "BackgroundTaskRegistry") -> Struc
         A StructuredTool for checking progress
     """
 
-    async def check_task_progress(task_number: int | None = None) -> str:
+    async def task_progress(task_number: int | None = None) -> str:
         """Check the progress of background subagent tasks.
 
         Shows: status (running/completed), tool calls made, current activity,
@@ -149,14 +149,14 @@ def create_check_task_progress_tool(registry: "BackgroundTaskRegistry") -> Struc
         return output
 
     return StructuredTool.from_function(
-        name="check_task_progress",
+        name="task_progress",
         description=(
             "Check the progress of background subagent tasks. Shows status, "
             "tool calls made, current activity, and elapsed time. "
-            "Use check_task_progress(task_number=1) for a specific task or "
-            "check_task_progress() to see all tasks."
+            "Use task_progress(task_number=1) for a specific task or "
+            "task_progress() to see all tasks."
         ),
-        coroutine=check_task_progress,
+        coroutine=task_progress,
     )
 
 

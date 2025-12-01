@@ -238,7 +238,7 @@ class PTCAgent:
             enabled=True,
         )
         middleware_list.append(background_middleware)
-        # Add background management tools (wait, check_task_progress)
+        # Add background management tools (wait, task_progress)
         tools.extend(background_middleware.tools)
         # Create counter middleware for tracking subagent tool calls
         counter_middleware = ToolCallCounterMiddleware(
