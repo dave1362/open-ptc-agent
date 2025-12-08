@@ -3,11 +3,15 @@
 Uses Tavily for URL discovery and fetches full webpage content.
 """
 
+from typing import Annotated, Literal
+
 import httpx
+import structlog
 from langchain_core.tools import InjectedToolArg, tool
 from markdownify import markdownify
 from tavily import TavilyClient
-from typing_extensions import Annotated, Literal
+
+logger = structlog.get_logger(__name__)
 
 # Lazy-initialized client to avoid import-time errors when API key is missing
 _tavily_client: TavilyClient | None = None
@@ -39,8 +43,8 @@ def fetch_webpage_content(url: str, timeout: float = 10.0) -> str:
         response = httpx.get(url, headers=headers, timeout=timeout)
         response.raise_for_status()
         return markdownify(response.text)
-    except Exception as e:
-        return f"Error fetching content from {url}: {str(e)}"
+    except (httpx.HTTPError, httpx.TimeoutException) as e:
+        return f"Error fetching content from {url}: {e!s}"
 
 
 @tool(parse_docstring=True)
@@ -64,17 +68,24 @@ def tavily_search(
         Formatted search results with full webpage content
     """
     # Use Tavily to discover URLs
-    search_results = _get_tavily_client().search(
-        query,
-        max_results=max_results,
-        topic=topic,
-    )
+    try:
+        search_results = _get_tavily_client().search(
+            query,
+            max_results=max_results,
+            topic=topic,
+        )
+    except Exception as e:
+        logger.exception("Tavily search failed", query=query)
+        return f"ERROR: Search failed - {e}"
 
     # Fetch full content for each URL
     result_texts = []
     for result in search_results.get("results", []):
-        url = result["url"]
-        title = result["title"]
+        url = result.get("url", "")
+        title = result.get("title", "Untitled")
+
+        if not url:
+            continue  # Skip results without URL
 
         # Fetch webpage content
         content = fetch_webpage_content(url)
@@ -89,8 +100,7 @@ def tavily_search(
         result_texts.append(result_text)
 
     # Format final response
-    response = f"""Found {len(result_texts)} result(s) for '{query}':
+    return f"""Found {len(result_texts)} result(s) for '{query}':
 
 {chr(10).join(result_texts)}"""
 
-    return response

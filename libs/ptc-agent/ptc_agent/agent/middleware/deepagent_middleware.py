@@ -4,13 +4,13 @@ Provides a customizable middleware stack for create_agent() that replaces
 the auto-added middlewares from create_deep_agent()
 """
 
-from typing import Any, List, Optional
+from typing import Any
 
+from deepagents.middleware import FilesystemMiddleware, SubAgentMiddleware
+from deepagents.middleware.patch_tool_calls import PatchToolCallsMiddleware
 from langchain.agents.middleware import TodoListMiddleware
 from langchain.agents.middleware.summarization import SummarizationMiddleware
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
-from deepagents.middleware import SubAgentMiddleware, FilesystemMiddleware
-from deepagents.middleware.patch_tool_calls import PatchToolCallsMiddleware
 
 SUBAGENT_MIDDLEWARE_DESCRIPTION = """Launch a subagent for complex, multi-step tasks.
 
@@ -29,13 +29,13 @@ The subagent works autonomously. Provide clear, complete instructions."""
 
 def create_deepagent_middleware(
     model: Any,
-    tools: List[Any],
-    subagents: List[Any],
+    tools: list[Any],
+    subagents: list[Any],
     backend: Any,
-    custom_middleware: Optional[List[Any]] = None,
+    custom_middleware: list[Any] | None = None,
     max_tokens_before_summary: int = 170000,
     messages_to_keep: int = 6,
-) -> List[Any]:
+) -> list[Any]:
     """Create the deepagent-style middleware stack.
 
     This factory builds the middleware list that replaces create_deep_agent's

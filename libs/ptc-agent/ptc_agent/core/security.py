@@ -2,7 +2,7 @@
 
 import hashlib
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import structlog
 
@@ -12,10 +12,10 @@ logger = structlog.get_logger(__name__)
 class ExecutionMonitor:
     """Monitors code execution for security and performance."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize execution monitor."""
-        self.execution_history: List[Dict[str, Any]] = []
-        self.active_executions: Dict[str, Dict[str, Any]] = {}
+        self.execution_history: list[dict[str, Any]] = []
+        self.active_executions: dict[str, dict[str, Any]] = {}
 
     def start_execution(
         self,
@@ -30,7 +30,6 @@ class ExecutionMonitor:
             code: Code being executed
             sandbox_id: Sandbox identifier
         """
-
         code_hash = hashlib.sha256(code.encode()).hexdigest()
 
         execution_info = {
@@ -53,9 +52,10 @@ class ExecutionMonitor:
     def end_execution(
         self,
         execution_id: str,
+        *,
         success: bool,
-        output: Optional[str] = None,
-        error: Optional[str] = None,
+        output: str | None = None,
+        error: str | None = None,
     ) -> None:
         """End monitoring an execution.
 
@@ -65,7 +65,6 @@ class ExecutionMonitor:
             output: Execution output
             error: Error message if failed
         """
-
         if execution_id not in self.active_executions:
             logger.warning("Execution not found in active list", execution_id=execution_id)
             return
@@ -88,13 +87,12 @@ class ExecutionMonitor:
             duration=execution_info["duration"],
         )
 
-    def get_execution_stats(self) -> Dict[str, Any]:
+    def get_execution_stats(self) -> dict[str, Any]:
         """Get execution statistics.
 
         Returns:
             Dictionary with execution statistics
         """
-
         total_executions = len(self.execution_history)
         successful_executions = sum(1 for ex in self.execution_history if ex["success"])
         failed_executions = total_executions - successful_executions
@@ -112,7 +110,7 @@ class ExecutionMonitor:
             "active_executions": len(self.active_executions),
         }
 
-    def get_recent_executions(self, limit: int = 10) -> List[Dict[str, Any]]:
+    def get_recent_executions(self, limit: int = 10) -> list[dict[str, Any]]:
         """Get recent execution history.
 
         Args:
@@ -121,14 +119,13 @@ class ExecutionMonitor:
         Returns:
             List of recent executions
         """
-
         return self.execution_history[-limit:]
 
 
 class RateLimiter:
     """Rate limiter for code execution."""
 
-    def __init__(self, max_executions: int = 100, window_seconds: int = 3600):
+    def __init__(self, max_executions: int = 100, window_seconds: int = 3600) -> None:
         """Initialize rate limiter.
 
         Args:
@@ -137,7 +134,7 @@ class RateLimiter:
         """
         self.max_executions = max_executions
         self.window_seconds = window_seconds
-        self.execution_timestamps: List[float] = []
+        self.execution_timestamps: list[float] = []
 
         logger.info(
             "Initialized RateLimiter",
@@ -145,13 +142,12 @@ class RateLimiter:
             window_seconds=window_seconds,
         )
 
-    def check_rate_limit(self) -> tuple[bool, Optional[str]]:
+    def check_rate_limit(self) -> tuple[bool, str | None]:
         """Check if rate limit is exceeded.
 
         Returns:
             Tuple of (is_allowed, error_message)
         """
-
         now = time.time()
 
         # Remove old timestamps outside the window
@@ -168,7 +164,6 @@ class RateLimiter:
 
     def record_execution(self) -> None:
         """Record a new execution."""
-
         self.execution_timestamps.append(time.time())
 
         logger.debug(
@@ -181,9 +176,9 @@ class RateLimiter:
 class ResourceMonitor:
     """Monitors resource usage in sandboxes."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize resource monitor."""
-        self.sandbox_resources: Dict[str, Dict[str, Any]] = {}
+        self.sandbox_resources: dict[str, dict[str, Any]] = {}
 
     def track_sandbox(self, sandbox_id: str) -> None:
         """Start tracking a sandbox.
@@ -191,7 +186,6 @@ class ResourceMonitor:
         Args:
             sandbox_id: Sandbox identifier
         """
-
         self.sandbox_resources[sandbox_id] = {
             "created_at": time.time(),
             "execution_count": 0,
@@ -208,7 +202,6 @@ class ResourceMonitor:
             sandbox_id: Sandbox identifier
             code_length: Length of executed code
         """
-
         if sandbox_id not in self.sandbox_resources:
             self.track_sandbox(sandbox_id)
 
@@ -222,14 +215,13 @@ class ResourceMonitor:
             sandbox_id: Sandbox identifier
             operation: Operation type (create, read, write, delete)
         """
-
         if sandbox_id not in self.sandbox_resources:
             self.track_sandbox(sandbox_id)
 
         if operation == "create":
             self.sandbox_resources[sandbox_id]["files_created"] += 1
 
-    def get_sandbox_stats(self, sandbox_id: str) -> Optional[Dict[str, Any]]:
+    def get_sandbox_stats(self, sandbox_id: str) -> dict[str, Any] | None:
         """Get statistics for a sandbox.
 
         Args:
@@ -238,7 +230,6 @@ class ResourceMonitor:
         Returns:
             Statistics dictionary or None if not tracked
         """
-
         if sandbox_id not in self.sandbox_resources:
             return None
 
@@ -253,7 +244,6 @@ class ResourceMonitor:
         Args:
             sandbox_id: Sandbox identifier
         """
-
         if sandbox_id in self.sandbox_resources:
             del self.sandbox_resources[sandbox_id]
             logger.info("Stopped tracking sandbox", sandbox_id=sandbox_id)
@@ -262,15 +252,15 @@ class ResourceMonitor:
 class SecurityLogger:
     """Specialized logger for security events."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize security logger."""
-        self.security_events: List[Dict[str, Any]] = []
+        self.security_events: list[dict[str, Any]] = []
 
     def log_validation_failure(
         self,
         code_hash: str,
         reason: str,
-        blocked_pattern: Optional[str] = None,
+        blocked_pattern: str | None = None,
     ) -> None:
         """Log a code validation failure.
 
@@ -279,7 +269,6 @@ class SecurityLogger:
             reason: Reason for failure
             blocked_pattern: Blocked pattern if applicable
         """
-
         event = {
             "type": "validation_failure",
             "timestamp": time.time(),
@@ -304,7 +293,6 @@ class SecurityLogger:
             execution_id: Execution identifier
             duration: Execution duration before timeout
         """
-
         event = {
             "type": "execution_timeout",
             "timestamp": time.time(),
@@ -319,7 +307,7 @@ class SecurityLogger:
     def log_suspicious_activity(
         self,
         activity_type: str,
-        details: Dict[str, Any],
+        details: dict[str, Any],
     ) -> None:
         """Log suspicious activity.
 
@@ -327,7 +315,6 @@ class SecurityLogger:
             activity_type: Type of suspicious activity
             details: Additional details
         """
-
         event = {
             "type": "suspicious_activity",
             "timestamp": time.time(),
@@ -339,7 +326,7 @@ class SecurityLogger:
 
         logger.warning("Suspicious activity detected", activity_type=activity_type, details=details)
 
-    def get_security_events(self, limit: int = 100) -> List[Dict[str, Any]]:
+    def get_security_events(self, limit: int = 100) -> list[dict[str, Any]]:
         """Get recent security events.
 
         Args:
@@ -348,5 +335,4 @@ class SecurityLogger:
         Returns:
             List of security events
         """
-
         return self.security_events[-limit:]

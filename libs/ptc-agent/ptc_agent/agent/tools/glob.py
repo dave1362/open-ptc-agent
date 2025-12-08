@@ -1,15 +1,15 @@
 """Glob tool for file pattern matching."""
 
 import asyncio
-from typing import Any, Optional
+from typing import Any
 
 import structlog
-from langchain_core.tools import tool
+from langchain_core.tools import BaseTool, tool
 
 logger = structlog.get_logger(__name__)
 
 
-def create_glob_tool(sandbox: Any):
+def create_glob_tool(sandbox: Any) -> BaseTool:
     """Factory function to create Glob tool.
 
     Args:
@@ -20,7 +20,7 @@ def create_glob_tool(sandbox: Any):
     """
 
     @tool
-    async def glob(pattern: str, path: Optional[str] = None) -> str:
+    async def glob(pattern: str, path: str | None = None) -> str:
         """Find files matching a glob pattern.
 
         Use for: Finding files by name. For content search, use Grep.
@@ -70,7 +70,7 @@ def create_glob_tool(sandbox: Any):
             return result.rstrip()
 
         except Exception as e:
-            error_msg = f"Failed to glob files: {str(e)}"
+            error_msg = f"Failed to glob files: {e!s}"
             logger.error(error_msg, pattern=pattern, path=search_path, error=str(e), exc_info=True)
             return f"ERROR: {error_msg}"
 

@@ -1,5 +1,4 @@
-"""
-Open PTC Agent - PTC Core Infrastructure
+"""Open PTC Agent - PTC Core Infrastructure.
 
 An open source implementation of Programmatic Tool Calling (PTC) with MCP,
 where agents generate executable Python code to interact with MCP servers.
@@ -16,26 +15,21 @@ For agent implementations, see the agent package.
 
 __version__ = "0.1.0"
 
-from .sandbox import PTCSandbox, ExecutionResult, ChartData
-from .session import Session, SessionManager
 from ptc_agent.config.core import CoreConfig
+
 from .mcp_registry import MCPRegistry, MCPToolInfo
+from .sandbox import ChartData, ExecutionResult, PTCSandbox
+from .session import Session, SessionManager
 from .tool_generator import ToolFunctionGenerator
 
-# Backward compatibility aliases
-#Config = CoreConfig
-#CodeActSandbox = PTCSandbox  # Legacy alias
-
 __all__ = [
-    "PTCSandbox",
-    #"CodeActSandbox",  # Legacy alias
-    "ExecutionResult",
     "ChartData",
-    "Session",
-    "SessionManager",
     "CoreConfig",
-    #"Config",  # Backward compatibility
+    "ExecutionResult",
     "MCPRegistry",
     "MCPToolInfo",
+    "PTCSandbox",
+    "Session",
+    "SessionManager",
     "ToolFunctionGenerator",
 ]

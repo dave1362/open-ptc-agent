@@ -4,8 +4,7 @@ These functions generate dynamic content based on runtime data
 and are kept in Python rather than templates.
 """
 
-from typing import Any, Optional
-
+from typing import Any
 
 # MCP section template for system prompts
 MCP_SECTION_TEMPLATE = """
@@ -26,7 +25,7 @@ Import and use MCP tools in your execute_code calls:
 from tools.{{server_name}} import {{tool_name}}
 
 result = tool_name(param="value")
-print(result)
+print(result)  # noqa: T201
 ```
 
 Workspace directories:
@@ -58,7 +57,7 @@ def build_mcp_section(tool_summary: str) -> str:
 def format_tool_summary(
     tools_by_server: dict,
     mode: str = "summary",
-    server_configs: Optional[dict] = None,
+    server_configs: dict | None = None,
 ) -> str:
     """Format tool information for prompt.
 
@@ -77,11 +76,10 @@ def format_tool_summary(
     # Fallback to global mode when no server configs
     if mode == "summary":
         return _format_tool_summary_brief(tools_by_server, server_configs)
-    elif mode == "detailed":
+    if mode == "detailed":
         return _format_tool_summary_detailed(tools_by_server, server_configs)
-    else:
-        # Default to summary for unknown modes
-        return _format_tool_summary_brief(tools_by_server, server_configs)
+    # Default to summary for unknown modes
+    return _format_tool_summary_brief(tools_by_server, server_configs)
 
 
 def _format_tool_summary_per_server(
@@ -223,7 +221,7 @@ def _format_server_detailed(server_name: str, tools: list, config: Any) -> list:
 
 def _format_tool_summary_brief(
     tools_by_server: dict,
-    server_configs: Optional[dict] = None,
+    server_configs: dict | None = None,
 ) -> str:
     """Format brief tool summary (server names, descriptions, and module locations).
 
@@ -273,7 +271,7 @@ def _format_tool_summary_brief(
 
 def _format_tool_summary_detailed(
     tools_by_server: dict,
-    server_configs: Optional[dict] = None,
+    server_configs: dict | None = None,
 ) -> str:
     """Format detailed tool summary (full tool signatures and descriptions).
 

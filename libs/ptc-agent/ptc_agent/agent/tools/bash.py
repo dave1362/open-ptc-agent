@@ -1,14 +1,14 @@
 """Execute bash commands in the sandbox."""
 
-from typing import Any, Optional
+from typing import Any
 
 import structlog
-from langchain_core.tools import tool
+from langchain_core.tools import BaseTool, tool
 
 logger = structlog.get_logger(__name__)
 
 
-def create_execute_bash_tool(sandbox: Any):
+def create_execute_bash_tool(sandbox: Any) -> BaseTool:
     """Factory function to create Bash tool with injected dependencies.
 
     Args:
@@ -21,10 +21,10 @@ def create_execute_bash_tool(sandbox: Any):
     @tool
     async def Bash(
         command: str,
-        description: Optional[str] = None,
-        timeout: Optional[int] = 120000,
-        run_in_background: Optional[bool] = False,
-        working_dir: Optional[str] = "/home/daytona",
+        description: str | None = None,
+        timeout: int | None = 120000,
+        run_in_background: bool | None = False,
+        working_dir: str | None = "/home/daytona",
     ) -> str:
         """Execute bash commands in a persistent shell session.
 
@@ -52,8 +52,8 @@ def create_execute_bash_tool(sandbox: Any):
                 background=run_in_background,
             )
 
-            # Convert timeout from milliseconds to seconds for sandbox
-            timeout_seconds = timeout / 1000 if timeout else 120
+            # Convert timeout from milliseconds to seconds for sandbox (int required)
+            timeout_seconds = int(timeout / 1000) if timeout else 120
 
             # Execute bash command in sandbox
             result = await sandbox.execute_bash_command(
@@ -79,30 +79,28 @@ def create_execute_bash_tool(sandbox: Any):
                         output_length=len(output),
                     )
                     return output
-                else:
-                    # Command succeeded but no output (e.g., mkdir)
-                    logger.info(
-                        "Bash command executed successfully (no output)",
-                        command=command[:50],
-                    )
-                    return "Command completed successfully"
-
-            else:
-                # Command failed
-                stderr = result.get("stderr", "Command execution failed")
-                exit_code = result.get("exit_code", -1)
-
-                logger.warning(
-                    "Bash command failed",
+                # Command succeeded but no output (e.g., mkdir)
+                logger.info(
+                    "Bash command executed successfully (no output)",
                     command=command[:50],
-                    exit_code=exit_code,
-                    stderr_length=len(stderr),
                 )
+                return "Command completed successfully"
 
-                return f"ERROR: Command failed (exit code {exit_code})\n{stderr}"
+            # Command failed
+            stderr = result.get("stderr", "Command execution failed")
+            exit_code = result.get("exit_code", -1)
+
+            logger.warning(
+                "Bash command failed",
+                command=command[:50],
+                exit_code=exit_code,
+                stderr_length=len(stderr),
+            )
+
+            return f"ERROR: Command failed (exit code {exit_code})\n{stderr}"
 
         except Exception as e:
-            error_msg = f"Failed to execute bash command: {str(e)}"
+            error_msg = f"Failed to execute bash command: {e!s}"
             logger.error(
                 error_msg,
                 command=command[:50],

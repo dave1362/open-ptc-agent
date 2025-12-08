@@ -1,5 +1,4 @@
-"""
-Standalone Cloudflare R2 Upload Module
+"""Standalone Cloudflare R2 Upload Module.
 
 A self-contained module for uploading files to Cloudflare R2 (S3-compatible).
 
@@ -23,7 +22,7 @@ Usage:
     success = upload_file("images/photo.png", "/path/to/photo.png")
     if success:
         url = get_public_url("images/photo.png")
-        print(f"Uploaded to: {url}")
+        print(f"Uploaded to: {url}")  # noqa: T201
 
     # Upload base64-encoded image
     upload_base64("charts/chart.png", base64_image_data)
@@ -33,7 +32,7 @@ Usage:
 
     # Check if file exists
     if does_object_exist("images/photo.png"):
-        print("File exists!")
+        print("File exists!")  # noqa: T201
 
     # Delete file
     delete_object("images/photo.png")
@@ -45,9 +44,9 @@ Configuration:
 import base64
 import logging
 import os
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
-from datetime import datetime
+from typing import Any
 
 import boto3
 from botocore.config import Config
@@ -94,9 +93,8 @@ class R2Config:
         return f"https://pub-{cls.ACCOUNT_ID}.r2.dev"
 
 
-def get_r2_client():
-    """
-    Create and return a configured R2 client using boto3.
+def get_r2_client() -> Any:
+    """Create and return a configured R2 client using boto3.
 
     Uses environment variables for authentication:
     - R2_ACCESS_KEY_ID
@@ -123,8 +121,7 @@ def get_r2_client():
 
 
 def upload_file(key: str, file_path: str) -> bool:
-    """
-    Upload a local file to R2.
+    """Upload a local file to R2.
 
     Args:
         key: The object key (path) in R2 bucket (e.g., "images/photo.png")
@@ -137,13 +134,13 @@ def upload_file(key: str, file_path: str) -> bool:
         >>> upload_file("uploads/document.pdf", "/home/user/document.pdf")
         True
     """
-    file_path = Path(file_path)
+    path_obj = Path(file_path)
 
-    if not file_path.exists():
-        logger.error(f"File not found: {file_path}")
+    if not path_obj.exists():
+        logger.error(f"File not found: {path_obj}")
         return False
 
-    file_size = file_path.stat().st_size
+    file_size = path_obj.stat().st_size
     if file_size > R2Config.MAX_UPLOAD_SIZE:
         logger.error(
             f"File too large: {file_size} bytes > {R2Config.MAX_UPLOAD_SIZE} bytes limit"
@@ -153,27 +150,26 @@ def upload_file(key: str, file_path: str) -> bool:
     try:
         client = get_r2_client()
 
-        with open(file_path, "rb") as f:
+        with path_obj.open("rb") as f:
             client.put_object(
                 Bucket=R2Config.BUCKET_NAME,
                 Key=key,
                 Body=f,
             )
 
-        logger.debug(f"Uploaded {file_path} to R2 as {key}")
+        logger.debug(f"Uploaded {path_obj} to R2 as {key}")
         return True
 
-    except ClientError as e:
-        logger.error(f"R2 upload failed for {key}: {e}")
+    except ClientError:
+        logger.exception(f"R2 upload failed for {key}")
         return False
-    except Exception as e:
-        logger.error(f"Unexpected error uploading {key}: {e}")
+    except Exception:
+        logger.exception(f"Unexpected error uploading {key}")
         return False
 
 
 def upload_base64(key: str, image_data: str) -> bool:
-    """
-    Upload base64-encoded image data to R2.
+    """Upload base64-encoded image data to R2.
 
     Args:
         key: The object key (path) in R2 bucket
@@ -205,8 +201,7 @@ def upload_base64(key: str, image_data: str) -> bool:
 
 
 def upload_bytes(key: str, data: bytes) -> bool:
-    """
-    Upload raw bytes to R2.
+    """Upload raw bytes to R2.
 
     Args:
         key: The object key (path) in R2 bucket
@@ -238,17 +233,16 @@ def upload_bytes(key: str, data: bytes) -> bool:
         logger.debug(f"Uploaded bytes to R2 as {key}")
         return True
 
-    except ClientError as e:
-        logger.error(f"R2 upload failed for {key}: {e}")
+    except ClientError:
+        logger.exception(f"R2 upload failed for {key}")
         return False
-    except Exception as e:
-        logger.error(f"Unexpected error uploading {key}: {e}")
+    except Exception:
+        logger.exception(f"Unexpected error uploading {key}")
         return False
 
 
 def does_object_exist(key: str) -> bool:
-    """
-    Check if an object exists in the R2 bucket.
+    """Check if an object exists in the R2 bucket.
 
     Args:
         key: The object key (path) to check
@@ -279,8 +273,7 @@ def does_object_exist(key: str) -> bool:
 
 
 def delete_object(key: str) -> bool:
-    """
-    Delete an object from the R2 bucket.
+    """Delete an object from the R2 bucket.
 
     Args:
         key: The object key (path) to delete
@@ -312,8 +305,7 @@ def delete_object(key: str) -> bool:
 
 
 def get_public_url(key: str) -> str:
-    """
-    Get the public URL for an uploaded object.
+    """Get the public URL for an uploaded object.
 
     Note: This requires either:
     1. Public access enabled on the bucket (r2.dev domain)
@@ -332,9 +324,8 @@ def get_public_url(key: str) -> str:
     return f"{R2Config.get_public_url_base()}/{key}"
 
 
-def get_signed_url(key: str, expires_in: int = 3600) -> Optional[str]:
-    """
-    Generate a signed URL for temporary access to a private object.
+def get_signed_url(key: str, expires_in: int = 3600) -> str | None:
+    """Generate a signed URL for temporary access to a private object.
 
     Args:
         key: The object key (path) in R2 bucket
@@ -345,12 +336,12 @@ def get_signed_url(key: str, expires_in: int = 3600) -> Optional[str]:
 
     Example:
         >>> url = get_signed_url("private/document.pdf", expires_in=7200)
-        >>> print(url)  # URL valid for 2 hours
+        >>> print(url)  # URL valid for 2 hours  # noqa: T201
     """
     try:
         client = get_r2_client()
 
-        url = client.generate_presigned_url(
+        return client.generate_presigned_url(
             "get_object",
             Params={
                 "Bucket": R2Config.BUCKET_NAME,
@@ -359,7 +350,6 @@ def get_signed_url(key: str, expires_in: int = 3600) -> Optional[str]:
             ExpiresIn=expires_in,
         )
 
-        return url
 
     except ClientError as e:
         logger.error(f"Failed to generate signed URL for {key}: {e}")
@@ -371,11 +361,10 @@ def get_signed_url(key: str, expires_in: int = 3600) -> Optional[str]:
 
 def upload_image(
     file_path: str,
-    prefix: str = None,
-    custom_name: str = None
-) -> Optional[str]:
-    """
-    Upload an image file with auto-generated key and return the public URL.
+    prefix: str | None = None,
+    custom_name: str | None = None
+) -> str | None:
+    """Upload an image file with auto-generated key and return the public URL.
 
     Args:
         file_path: Path to the local image file
@@ -387,25 +376,25 @@ def upload_image(
 
     Example:
         >>> url = upload_image("/path/to/photo.png")
-        >>> print(url)
+        >>> print(url)  # noqa: T201
         'https://your-domain.com/images/photo_20250118_143022.png'
 
         >>> url = upload_image("/path/to/photo.png", prefix="avatars/", custom_name="user123.png")
-        >>> print(url)
+        >>> print(url)  # noqa: T201
         'https://your-domain.com/avatars/user123.png'
     """
     if prefix is None:
         prefix = R2Config.DEFAULT_IMAGE_PREFIX
 
-    file_path = Path(file_path)
+    path_obj = Path(file_path)
 
     if custom_name:
         filename = custom_name
     else:
         # Add timestamp to avoid collisions
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        stem = file_path.stem
-        suffix = file_path.suffix
+        timestamp = datetime.now(tz=UTC).strftime("%Y%m%d_%H%M%S")
+        stem = path_obj.stem
+        suffix = path_obj.suffix
         filename = f"{stem}_{timestamp}{suffix}"
 
     key = f"{prefix.rstrip('/')}/{filename}"
@@ -416,9 +405,8 @@ def upload_image(
     return None
 
 
-def upload_chart(file_path: str, custom_name: str = None) -> Optional[str]:
-    """
-    Upload a chart/graph image to the charts directory.
+def upload_chart(file_path: str, custom_name: str | None = None) -> str | None:
+    """Upload a chart/graph image to the charts directory.
 
     Args:
         file_path: Path to the local chart image
@@ -429,7 +417,7 @@ def upload_chart(file_path: str, custom_name: str = None) -> Optional[str]:
 
     Example:
         >>> url = upload_chart("/path/to/stock_chart.png")
-        >>> print(url)
+        >>> print(url)  # noqa: T201
         'https://your-domain.com/charts/stock_chart_20250118_143022.png'
     """
     return upload_image(
@@ -440,17 +428,16 @@ def upload_chart(file_path: str, custom_name: str = None) -> Optional[str]:
 
 
 def verify_connection() -> bool:
-    """
-    Verify R2 connection and credentials.
+    """Verify R2 connection and credentials.
 
     Returns:
         bool: True if connection successful, False otherwise
 
     Example:
         >>> if verify_connection():
-        ...     print("R2 connection verified!")
+        ...     print("R2 connection verified!")  # noqa: T201
         ... else:
-        ...     print("Connection failed - check credentials")
+        ...     print("Connection failed - check credentials")  # noqa: T201
     """
     try:
         client = get_r2_client()
@@ -482,12 +469,12 @@ if __name__ == "__main__":
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
 
-    print("Cloudflare R2 Uploader - Connection Test")
-    print("=" * 40)
-    print(f"Account ID: {R2Config.ACCOUNT_ID}")
-    print(f"Bucket:     {R2Config.BUCKET_NAME}")
-    print(f"Endpoint:   {R2Config.get_endpoint_url()}")
-    print("=" * 40)
+    print("Cloudflare R2 Uploader - Connection Test")  # noqa: T201
+    print("=" * 40)  # noqa: T201
+    print(f"Account ID: {R2Config.ACCOUNT_ID}")  # noqa: T201
+    print(f"Bucket:     {R2Config.BUCKET_NAME}")  # noqa: T201
+    print(f"Endpoint:   {R2Config.get_endpoint_url()}")  # noqa: T201
+    print("=" * 40)  # noqa: T201
 
     # Check environment variables
     missing_vars = []
@@ -501,20 +488,20 @@ if __name__ == "__main__":
         missing_vars.append("R2_BUCKET_NAME")
 
     if missing_vars:
-        print(f"ERROR: Missing environment variables: {', '.join(missing_vars)}")
+        print(f"ERROR: Missing environment variables: {', '.join(missing_vars)}")  # noqa: T201
         sys.exit(1)
 
-    print("Environment variables: OK")
+    print("Environment variables: OK")  # noqa: T201
 
     # Test connection
     if verify_connection():
-        print("Connection test: PASSED")
+        print("Connection test: PASSED")  # noqa: T201
     else:
-        print("Connection test: FAILED")
+        print("Connection test: FAILED")  # noqa: T201
         sys.exit(1)
 
-    print("\nReady to upload files!")
-    print("\nUsage examples:")
-    print('  upload_file("images/test.png", "/path/to/test.png")')
-    print('  url = upload_image("/path/to/image.png")')
-    print('  url = upload_chart("/path/to/chart.png")')
+    print("\nReady to upload files!")  # noqa: T201
+    print("\nUsage examples:")  # noqa: T201
+    print('  upload_file("images/test.png", "/path/to/test.png")')  # noqa: T201
+    print('  url = upload_image("/path/to/image.png")')  # noqa: T201
+    print('  url = upload_chart("/path/to/chart.png")')  # noqa: T201

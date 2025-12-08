@@ -4,15 +4,26 @@ This module provides common functions for loading and validating YAML configurat
 files
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import aiofiles
 import structlog
 import yaml
 from dotenv import load_dotenv
+
+if TYPE_CHECKING:
+    from ptc_agent.config.core import (
+        DaytonaConfig,
+        FilesystemConfig,
+        LoggingConfig,
+        MCPConfig,
+        SecurityConfig,
+    )
 
 
 async def load_yaml_file(file_path: Path) -> dict[str, Any]:
@@ -35,12 +46,13 @@ async def load_yaml_file(file_path: Path) -> dict[str, Any]:
         )
 
     try:
-        async with aiofiles.open(file_path, "r") as f:
+        async with aiofiles.open(file_path) as f:
             content = await f.read()
         # yaml.safe_load is CPU-bound but fast for config files
         config_data = yaml.safe_load(content)
     except yaml.YAMLError as e:
-        raise ValueError(f"Failed to parse config.yaml: {e}")
+        msg = f"Failed to parse config.yaml: {e}"
+        raise ValueError(msg) from e
 
     if not config_data:
         raise ValueError(
@@ -135,7 +147,7 @@ FILESYSTEM_REQUIRED_FIELDS = ["allowed_directories"]
 # Factory functions for creating config objects from dictionaries
 
 
-def create_daytona_config(data: dict[str, Any]) -> "DaytonaConfig":
+def create_daytona_config(data: dict[str, Any]) -> DaytonaConfig:
     """Create DaytonaConfig from config data dictionary.
 
     Args:
@@ -145,6 +157,7 @@ def create_daytona_config(data: dict[str, Any]) -> "DaytonaConfig":
         Configured DaytonaConfig object
     """
     import os
+
     from ptc_agent.config.core import DaytonaConfig
 
     validate_section_fields(data, DAYTONA_REQUIRED_FIELDS, "daytona")
@@ -161,7 +174,7 @@ def create_daytona_config(data: dict[str, Any]) -> "DaytonaConfig":
     )
 
 
-def create_security_config(data: dict[str, Any]) -> "SecurityConfig":
+def create_security_config(data: dict[str, Any]) -> SecurityConfig:
     """Create SecurityConfig from config data dictionary.
 
     Args:
@@ -183,7 +196,7 @@ def create_security_config(data: dict[str, Any]) -> "SecurityConfig":
     )
 
 
-def create_mcp_config(data: dict[str, Any]) -> "MCPConfig":
+def create_mcp_config(data: dict[str, Any]) -> MCPConfig:
     """Create MCPConfig from config data dictionary.
 
     Args:
@@ -205,7 +218,7 @@ def create_mcp_config(data: dict[str, Any]) -> "MCPConfig":
     )
 
 
-def create_logging_config(data: dict[str, Any]) -> "LoggingConfig":
+def create_logging_config(data: dict[str, Any]) -> LoggingConfig:
     """Create LoggingConfig from config data dictionary.
 
     Args:
@@ -223,7 +236,7 @@ def create_logging_config(data: dict[str, Any]) -> "LoggingConfig":
     )
 
 
-def create_filesystem_config(data: dict[str, Any]) -> "FilesystemConfig":
+def create_filesystem_config(data: dict[str, Any]) -> FilesystemConfig:
     """Create FilesystemConfig from config data dictionary.
 
     Args:

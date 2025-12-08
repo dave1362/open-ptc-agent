@@ -1,50 +1,50 @@
-"""
-Open PTC Agent Tools Package.
+"""Open PTC Agent Tools Package.
 
-This package contains all tools available to the PTC agent, organized by category:
-- code_execution: Tools for executing Python code in the sandbox (OSS-enabled)
-- bash: Tools for executing bash commands in the sandbox
-- filesystem: Tools for file and directory operations
-- search: Tools for file pattern matching and content search
-- research: Tools for web search and reasoning
+This package contains all tools available to the PTC agent:
+- bash: Bash command execution
+- code_execution: Python code execution with MCP tool access
+- file_ops: File read/write/edit operations
+- glob: File pattern matching
+- grep: Content search (ripgrep-based)
+- tavily: Web search
+- think: Strategic reflection for research
 
 Note: With deepagent, most filesystem tools (ls, read_file, write_file, edit_file,
 glob, grep) are provided by the FilesystemMiddleware. These LangChain tool wrappers
 are available for alternative agent configurations.
 """
 
-from typing import Any, List
+from typing import Any
 
 from langchain_core.tools import BaseTool
 
-from .code_execution import create_execute_code_tool
 from .bash import create_execute_bash_tool
-from .filesystem import create_filesystem_tools
-from .search import (
-    create_glob_tool,
-    create_grep_tool,
-)
-from .research import tavily_search, think_tool
+from .code_execution import create_execute_code_tool
+from .file_ops import create_filesystem_tools
+from .glob import create_glob_tool
+from .grep import create_grep_tool
+from .tavily import tavily_search
+from .think import think_tool
 
 __all__ = [
-    # Code execution
-    "create_execute_code_tool",
     # Bash
     "create_execute_bash_tool",
+    # Code execution
+    "create_execute_code_tool",
     # Filesystem
     "create_filesystem_tools",
     # Search
     "create_glob_tool",
     "create_grep_tool",
+    # Helper
+    "get_all_tools",
     # Research
     "tavily_search",
     "think_tool",
-    # Helper
-    "get_all_tools",
 ]
 
 
-def get_all_tools(sandbox: Any, mcp_registry: Any) -> List[BaseTool]:
+def get_all_tools(sandbox: Any, mcp_registry: Any) -> list[BaseTool]:
     """Create and return all available tools for the PTC agent.
 
     Args:
@@ -57,7 +57,7 @@ def get_all_tools(sandbox: Any, mcp_registry: Any) -> List[BaseTool]:
     # Create filesystem tools
     read_file, write_file, edit_file = create_filesystem_tools(sandbox)
 
-    tools = [
+    return [
         # Code execution tool (primary tool for complex operations)
         create_execute_code_tool(sandbox, mcp_registry),
         # Bash execution tool (for system commands and shell utilities)
@@ -71,4 +71,3 @@ def get_all_tools(sandbox: Any, mcp_registry: Any) -> List[BaseTool]:
         create_grep_tool(sandbox),
     ]
 
-    return tools

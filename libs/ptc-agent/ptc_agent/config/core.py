@@ -10,7 +10,7 @@ This module defines pure data classes for core configuration:
 Use src.config.loaders for file-based loading.
 """
 
-from typing import Dict, List, Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -31,7 +31,7 @@ class DaytonaConfig(BaseModel):
 
     # Snapshot configuration for faster sandbox initialization
     snapshot_enabled: bool = True
-    snapshot_name: Optional[str] = None
+    snapshot_name: str | None = None
     snapshot_auto_create: bool = True
 
 
@@ -45,13 +45,13 @@ class SecurityConfig(BaseModel):
     max_code_length: int = 10000
     max_file_size: int = 10485760  # 10MB
     enable_code_validation: bool = True
-    allowed_imports: List[str] = Field(default_factory=lambda: [
+    allowed_imports: list[str] = Field(default_factory=lambda: [
         "os", "sys", "json", "yaml", "requests", "asyncio",
         "pathlib", "datetime", "re", "collections", "itertools",
         "math", "random", "time", "typing", "dataclasses",
         "functools", "operator", "string", "textwrap",
     ])
-    blocked_patterns: List[str] = Field(default_factory=lambda: [
+    blocked_patterns: list[str] = Field(default_factory=lambda: [
         "eval(", "exec(", "__import__", "subprocess.call",
         "subprocess.Popen", "os.system", "os.popen",
     ])
@@ -65,11 +65,11 @@ class MCPServerConfig(BaseModel):
     description: str = ""  # What the MCP server does
     instruction: str = ""  # When/how to use this server
     transport: Literal["stdio", "sse", "http"] = "stdio"
-    command: Optional[str] = None
-    args: List[str] = Field(default_factory=list)
-    env: Dict[str, str] = Field(default_factory=dict)
-    url: Optional[str] = None  # For SSE/HTTP transports
-    tool_exposure_mode: Optional[Literal["summary", "detailed"]] = None  # Per-server override
+    command: str | None = None
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    url: str | None = None  # For SSE/HTTP transports
+    tool_exposure_mode: Literal["summary", "detailed"] | None = None  # Per-server override
 
 
 class MCPConfig(BaseModel):
@@ -79,10 +79,10 @@ class MCPConfig(BaseModel):
     additional tools for the agent.
     """
 
-    servers: List[MCPServerConfig] = Field(default_factory=list)
+    servers: list[MCPServerConfig] = Field(default_factory=list)
     tool_discovery_enabled: bool = True
     lazy_load: bool = True
-    cache_duration: Optional[int] = None
+    cache_duration: int | None = None
     tool_exposure_mode: Literal["summary", "detailed"] = "summary"
 
 
@@ -100,7 +100,7 @@ class FilesystemConfig(BaseModel):
     """
 
     working_directory: str = "/home/daytona"
-    allowed_directories: List[str] = Field(default_factory=lambda: ["/home/daytona", "/tmp"])
+    allowed_directories: list[str] = Field(default_factory=lambda: ["/home/daytona", "/tmp"])
     enable_path_validation: bool = True
 
 

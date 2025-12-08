@@ -9,12 +9,11 @@ This module provides the compiled LangGraph agent for deployment:
 
 import asyncio
 
-from langgraph.graph import StateGraph, MessagesState, START, END
+from langgraph.graph import END, START, MessagesState, StateGraph
 
-from ptc_agent.core.session import SessionManager
 from ptc_agent.agent.agent import PTCAgent
 from ptc_agent.config import load_from_files
-
+from ptc_agent.core.session import SessionManager
 
 # Global session state for sandbox persistence (lazy initialization)
 _session = None
@@ -22,7 +21,7 @@ _ptc_agent = None
 _config = None
 
 
-async def _ensure_initialized():
+async def _ensure_initialized() -> tuple:
     """Ensure PTC session is initialized with sandbox and MCP registry.
 
     This function lazily initializes:
@@ -51,7 +50,7 @@ async def _ensure_initialized():
     return _session, _ptc_agent
 
 
-async def ptc_node(state: MessagesState):
+async def ptc_node(state: MessagesState) -> dict:
     """Main PTC agent node - initializes sandbox on first call and runs agent.
 
     This node:
@@ -75,8 +74,7 @@ async def ptc_node(state: MessagesState):
     )
 
     # Run the full agent (deepagent handles its own tool loop)
-    result = await inner_agent.ainvoke(state)
-    return result
+    return await inner_agent.ainvoke(state)
 
 
 # Build a simple wrapper graph for LangGraph deployment

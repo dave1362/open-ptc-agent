@@ -4,10 +4,10 @@ This sub-agent has access to all main tools (execute_code, filesystem tools)
 and MCP tools, enabling complex task delegation from the main agent.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from ..prompts import get_loader, format_tool_summary
-from ..tools import create_execute_code_tool
+from ptc_agent.agent.prompts import format_tool_summary, get_loader
+from ptc_agent.agent.tools import create_execute_code_tool
 from ptc_agent.utils.storage.storage_uploader import is_storage_enabled
 
 
@@ -15,12 +15,13 @@ def get_general_subagent_config(
     sandbox: Any,
     mcp_registry: Any,
     max_iterations: int = 10,
-    additional_tools: Optional[List[Any]] = None,
+    additional_tools: list[Any] | None = None,
+    *,
     include_mcp_docs: bool = True,
     tool_exposure_mode: str = "full",
-    filesystem_tools: Optional[List[Any]] = None,
-    vision_tools: Optional[List[Any]] = None,
-) -> Dict[str, Any]:
+    filesystem_tools: list[Any] | None = None,
+    vision_tools: list[Any] | None = None,
+) -> dict[str, Any]:
     """Get configuration for the general-purpose sub-agent.
 
     Args:
@@ -106,12 +107,13 @@ def create_general_subagent(
     sandbox: Any,
     mcp_registry: Any,
     max_iterations: int = 10,
-    additional_tools: Optional[List[Any]] = None,
+    additional_tools: list[Any] | None = None,
+    *,
     include_mcp_docs: bool = True,
     tool_exposure_mode: str = "full",
-    filesystem_tools: Optional[List[Any]] = None,
-    vision_tools: Optional[List[Any]] = None,
-) -> Dict[str, Any]:
+    filesystem_tools: list[Any] | None = None,
+    vision_tools: list[Any] | None = None,
+) -> dict[str, Any]:
     """Create a general-purpose sub-agent for deepagent.
 
     Convenience wrapper around get_general_subagent_config.

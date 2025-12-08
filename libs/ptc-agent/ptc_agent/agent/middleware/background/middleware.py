@@ -6,15 +6,8 @@ allowing the main agent to continue working without blocking.
 
 import asyncio
 import contextvars
-from typing import Any, Awaitable, Callable
-
-
-# This ContextVar propagates task_id to subagent tool calls, used by
-# ToolCallCounterMiddleware to track which background task a tool call
-# belongs to.
-current_background_task_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
-    'current_background_task_id', default=None
-)
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 import structlog
 from langchain.agents.middleware import AgentMiddleware
@@ -25,8 +18,15 @@ from langgraph.types import Command
 
 from ptc_agent.agent.middleware.background.registry import BackgroundTaskRegistry
 from ptc_agent.agent.middleware.background.tools import (
-    create_wait_tool,
     create_task_progress_tool,
+    create_wait_tool,
+)
+
+# This ContextVar propagates task_id to subagent tool calls, used by
+# ToolCallCounterMiddleware to track which background task a tool call
+# belongs to.
+current_background_task_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "current_background_task_id", default=None
 )
 
 logger = structlog.get_logger(__name__)
@@ -45,7 +45,7 @@ def _truncate_description(description: str, max_sentences: int = 2) -> str:
     sentences = []
     remaining = description
     for _ in range(max_sentences):
-        period_idx = remaining.find('.')
+        period_idx = remaining.find(".")
         if period_idx == -1:
             sentences.append(remaining)
             break
@@ -53,7 +53,7 @@ def _truncate_description(description: str, max_sentences: int = 2) -> str:
         remaining = remaining[period_idx + 1:].lstrip()
         if not remaining:
             break
-    return ' '.join(sentences)
+    return " ".join(sentences)
 
 
 class BackgroundSubagentMiddleware(AgentMiddleware):
@@ -81,7 +81,7 @@ class BackgroundSubagentMiddleware(AgentMiddleware):
         result = await orchestrator.ainvoke(input_state)
     """
 
-    def __init__(self, timeout: float = 60.0, enabled: bool = True):
+    def __init__(self, timeout: float = 60.0, *, enabled: bool = True) -> None:
         """Initialize the middleware.
 
         Args:
@@ -137,6 +137,8 @@ class BackgroundSubagentMiddleware(AgentMiddleware):
 
         # Extract task details
         tool_call_id = tool_call.get("id", "unknown")
+        if not tool_call_id or tool_call_id == "unknown":
+            raise RuntimeError("Tool call ID is required for background tasks")
         args = tool_call.get("args", {})
         description = args.get("description", "unknown task")
         subagent_type = args.get("subagent_type", "general-purpose")
@@ -159,17 +161,12 @@ class BackgroundSubagentMiddleware(AgentMiddleware):
             description=description[:100],
         )
 
-        # Set task_id BEFORE creating the asyncio task
-        # This is critical: asyncio.create_task() copies the context at creation time,
-        # so the contextvar must be set before create_task() is called.
-        # The child task will inherit this value for:
-        # - ToolCallCounterMiddleware to track tool calls (needs tool_call_id for registry lookup)
         current_background_task_id.set(tool_call_id)
 
         # Define the background execution coroutine
         async def execute_in_background() -> dict[str, Any]:
             """Execute the subagent in the background."""
-            # Context already has task_id from parent (set before create_task)
+            # Context already has task_id from parent
             try:
                 result = await handler(request)
                 logger.debug(
@@ -188,7 +185,7 @@ class BackgroundSubagentMiddleware(AgentMiddleware):
                 )
                 return {"success": False, "error": str(e), "error_type": type(e).__name__}
 
-        # Spawn background task (don't await)
+        # Spawn background task
         asyncio_task = asyncio.create_task(
             execute_in_background(),
             name=f"background_subagent_{task.display_id}",

@@ -1,8 +1,8 @@
 """Jinja2 template loader for prompt templates."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 from jinja2 import Environment, FileSystemLoader
@@ -20,9 +20,9 @@ class PromptLoader:
 
     def __init__(
         self,
-        templates_dir: Optional[Path] = None,
-        session_start_time: Optional[datetime] = None,
-    ):
+        templates_dir: Path | None = None,
+        session_start_time: datetime | None = None,
+    ) -> None:
         """Initialize the prompt loader.
 
         Args:
@@ -33,7 +33,7 @@ class PromptLoader:
         """
         self.templates_dir = templates_dir or Path(__file__).parent / "templates"
         # Capture session start time once at initialization for cache consistency
-        self._session_start_time = session_start_time or datetime.now()
+        self._session_start_time = session_start_time or datetime.now(tz=UTC)
         self.env = Environment(
             loader=FileSystemLoader(str(self.templates_dir)),
             trim_blocks=True,
@@ -121,10 +121,10 @@ class PromptLoader:
         return self.render(f"components/{component_name}.md.j2", **kwargs)
 
 # Singleton instance
-_loader: Optional[PromptLoader] = None
+_loader: PromptLoader | None = None
 
 
-def get_loader(session_start_time: Optional[datetime] = None) -> PromptLoader:
+def get_loader(session_start_time: datetime | None = None) -> PromptLoader:
     """Get the singleton PromptLoader instance.
 
     Args:
@@ -140,7 +140,7 @@ def get_loader(session_start_time: Optional[datetime] = None) -> PromptLoader:
     return _loader
 
 
-def init_loader(session_start_time: Optional[datetime] = None) -> PromptLoader:
+def init_loader(session_start_time: datetime | None = None) -> PromptLoader:
     """Initialize a new loader with a specific start time.
 
     This resets any existing loader and creates a new one with the

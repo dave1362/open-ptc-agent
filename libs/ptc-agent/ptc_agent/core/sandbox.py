@@ -6,22 +6,24 @@ import hashlib
 import json
 import textwrap
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
+from types import TracebackType
 from typing import Any
 
 import aiofiles
 import structlog
 from daytona_sdk import Daytona, DaytonaConfig
 from daytona_sdk.common.daytona import (
-    CreateSandboxFromImageParams,
     CreateSandboxFromSnapshotParams,
     Image,
 )
 from daytona_sdk.common.snapshot import CreateSnapshotParams
 
 from ptc_agent.config.core import CoreConfig
+
 from .mcp_registry import MCPRegistry
 from .tool_generator import ToolFunctionGenerator
 
@@ -75,7 +77,7 @@ class PTCSandbox:
         "tqdm", "tabulate",
     ]
 
-    def __init__(self, config: CoreConfig, mcp_registry: MCPRegistry | None = None):
+    def __init__(self, config: CoreConfig, mcp_registry: MCPRegistry | None = None) -> None:
         """Initialize PTC sandbox.
 
         Args:
@@ -100,7 +102,7 @@ class PTCSandbox:
 
         logger.info("Initialized PTCSandbox")
 
-    async def _run_sync(self, func, *args, **kwargs) -> Any:
+    async def _run_sync(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """Run a synchronous function in a thread pool to avoid blocking.
 
         This wrapper is used for Daytona SDK calls which are synchronous.
@@ -117,10 +119,9 @@ class PTCSandbox:
         if kwargs:
             func_with_kwargs = partial(func, *args, **kwargs)
             return await loop.run_in_executor(None, func_with_kwargs)
-        elif args:
+        if args:
             return await loop.run_in_executor(None, func, *args)
-        else:
-            return await loop.run_in_executor(None, func)
+        return await loop.run_in_executor(None, func)
 
     def _get_mcp_packages(self) -> list[str]:
         """Extract MCP package names from enabled stdio servers.
@@ -152,10 +153,9 @@ class PTCSandbox:
         """
         if path == ".":
             return self.config.filesystem.working_directory
-        elif not path.startswith("/"):
+        if not path.startswith("/"):
             return f"{self.config.filesystem.working_directory}/{path}"
-        else:
-            return path
+        return path
 
     def _create_snapshot_image(self) -> Image:
         """Create image definition for snapshot with Node.js and MCP servers.
@@ -190,7 +190,7 @@ class PTCSandbox:
                 "rm -rf /var/lib/apt/lists/*"
             )
             .pip_install(*dependencies)  # Unpack list as individual arguments
-            .workdir('/home/daytona')
+            .workdir("/home/daytona")
         )
 
         logger.info(
@@ -213,10 +213,10 @@ class PTCSandbox:
 
         # Include configuration that affects the snapshot in the hash
         config_data = {
-            'python_version': self.config.daytona.python_version,
-            'dependencies': self.DEFAULT_DEPENDENCIES,
-            'mcp_packages': sorted(mcp_packages),  # Include MCP packages in hash
-            'apt_packages': ["curl", "nodejs", "ripgrep", "uv"],  # Include apt/curl-installed packages in hash
+            "python_version": self.config.daytona.python_version,
+            "dependencies": self.DEFAULT_DEPENDENCIES,
+            "mcp_packages": sorted(mcp_packages),  # Include MCP packages in hash
+            "apt_packages": ["curl", "nodejs", "ripgrep", "uv", "jq", "git", "unzip"],  # Include apt/curl-installed packages in hash
         }
 
         config_str = json.dumps(config_data, sort_keys=True)
@@ -242,19 +242,19 @@ class PTCSandbox:
         # Check if snapshot exists and is usable
         try:
             snapshots_result = await self._run_sync(self.daytona_client.snapshot.list)
-            snapshots = snapshots_result.items if hasattr(snapshots_result, 'items') else snapshots_result
+            snapshots = snapshots_result.items if hasattr(snapshots_result, "items") else snapshots_result
 
             # Only consider active or building snapshots as existing
             # Failed snapshots should be recreated
             snapshot_obj = None
             for s in snapshots:
-                if hasattr(s, 'name') and s.name == snapshot_name:
+                if hasattr(s, "name") and s.name == snapshot_name:
                     snapshot_obj = s
                     break
 
             if snapshot_obj:
-                state = snapshot_obj.state.value if hasattr(snapshot_obj.state, 'value') else str(snapshot_obj.state)
-                if state == 'build_failed':
+                state = snapshot_obj.state.value if hasattr(snapshot_obj.state, "value") else str(snapshot_obj.state)
+                if state == "build_failed":
                     logger.warning(
                         "Found failed snapshot, will recreate",
                         snapshot_name=snapshot_name,
@@ -266,10 +266,10 @@ class PTCSandbox:
                         logger.info("Deleted failed snapshot", snapshot_name=snapshot_name)
                         # Give the deletion a moment to complete
                         await asyncio.sleep(2)
-                    except Exception as del_err:
+                    except OSError as del_err:
                         logger.warning("Could not delete failed snapshot", error=str(del_err))
                     snapshot_exists = False
-                elif state in ['active', 'building']:
+                elif state in ["active", "building"]:
                     snapshot_exists = True
                 else:
                     logger.warning(f"Snapshot in unexpected state: {state}")
@@ -277,7 +277,7 @@ class PTCSandbox:
             else:
                 snapshot_exists = False
 
-        except Exception as e:
+        except OSError as e:
             logger.warning("Error listing snapshots", error=str(e))
             snapshot_exists = False
 
@@ -297,7 +297,7 @@ class PTCSandbox:
                 )
                 logger.info("Snapshot created successfully", snapshot_name=snapshot_name)
                 return snapshot_name
-            except Exception as e:
+            except OSError as e:
                 error_str = str(e)
                 # Check if snapshot already exists (race condition or list failed)
                 if "already exists" in error_str.lower():
@@ -306,9 +306,8 @@ class PTCSandbox:
                         snapshot_name=snapshot_name
                     )
                     return snapshot_name
-                else:
-                    logger.error("Failed to create snapshot", error=error_str)
-                    return None
+                logger.error("Failed to create snapshot", error=error_str)
+                return None
 
         if snapshot_exists:
             logger.info("Using existing snapshot", snapshot_name=snapshot_name)
@@ -340,7 +339,7 @@ class PTCSandbox:
                     CreateSandboxFromSnapshotParams(snapshot=snapshot_name)
                 )
                 logger.info("Sandbox created from snapshot", snapshot_name=snapshot_name)
-            except Exception as e:
+            except OSError as e:
                 logger.warning(
                     "Failed to create from snapshot, falling back to default",
                     error=str(e)
@@ -352,7 +351,7 @@ class PTCSandbox:
             logger.info("Creating sandbox from default image")
             self.sandbox = await self._run_sync(self.daytona_client.create)
 
-            self.sandbox_id = self.sandbox.id if hasattr(self.sandbox, 'id') else str(id(self.sandbox))
+            self.sandbox_id = self.sandbox.id if hasattr(self.sandbox, "id") else str(id(self.sandbox))
             logger.info("Daytona sandbox created", sandbox_id=self.sandbox_id)
 
             # Set up workspace structure
@@ -362,7 +361,8 @@ class PTCSandbox:
             await self._install_dependencies()
         else:
             # Snapshot-based creation
-            self.sandbox_id = self.sandbox.id if hasattr(self.sandbox, 'id') else str(id(self.sandbox))
+            assert self.sandbox is not None
+            self.sandbox_id = self.sandbox.id if hasattr(self.sandbox, "id") else str(id(self.sandbox))
             logger.info(
                 "Sandbox ready from snapshot",
                 sandbox_id=self.sandbox_id,
@@ -439,12 +439,12 @@ class PTCSandbox:
         self.sandbox_id = sandbox_id
 
         # Check sandbox state before attempting to start
-        state = getattr(self.sandbox, 'state', None)
+        state = getattr(self.sandbox, "state", None)
         if state:
-            state_value = state.value if hasattr(state, 'value') else str(state)
-            if state_value == 'started':
+            state_value = state.value if hasattr(state, "value") else str(state)
+            if state_value == "started":
                 logger.info("Sandbox already started, skipping start", sandbox_id=sandbox_id)
-            elif state_value in ('stopped', 'starting'):
+            elif state_value in ("stopped", "starting"):
                 logger.info("Starting stopped sandbox", sandbox_id=sandbox_id, state=state_value)
                 await self._run_sync(self.sandbox.start, timeout=60)
             else:
@@ -466,7 +466,7 @@ class PTCSandbox:
         # SKIP: _install_tool_modules() - tool modules already installed
 
         # Initialize MCP server sessions (needed for tool execution)
-        self.mcp_server_sessions = {}
+        self.mcp_server_sessions: dict[str, Any] = {}
         await self._start_internal_mcp_servers()
 
         logger.info(
@@ -490,6 +490,7 @@ class PTCSandbox:
         logger.info("Setting up workspace structure")
 
         # Get the working directory
+        assert self.sandbox is not None
         work_dir = await self._run_sync(self.sandbox.get_work_dir)
         logger.info(f"Sandbox working directory: {work_dir}")
 
@@ -508,9 +509,10 @@ class PTCSandbox:
         # Create all directories in parallel for faster setup
         async def create_directory(directory: str) -> None:
             try:
+                assert self.sandbox is not None
                 await self._run_sync(self.sandbox.process.exec, f"mkdir -p {directory}")
                 logger.info(f"Created directory: {directory}")
-            except Exception as e:
+            except OSError as e:
                 logger.warning(f"Error creating directory {directory}: {e}")
 
         await asyncio.gather(*[create_directory(d) for d in directories])
@@ -522,9 +524,7 @@ class PTCSandbox:
         this method uploads the Python files to the sandbox so they can be executed
         as subprocesses inside the sandbox environment.
         """
-        import os
-
-        work_dir = getattr(self, '_work_dir', '/home/daytona')
+        work_dir = getattr(self, "_work_dir", "/home/daytona")
         mcp_servers_dir = f"{work_dir}/mcp_servers"
 
         # Collect files to upload
@@ -538,8 +538,8 @@ class PTCSandbox:
                 if len(server.args) >= 3 and server.args[0] == "run" and server.args[1] == "python":
                     local_path = server.args[2]  # e.g., "mcp_servers/yfinance_mcp_server.py"
 
-                    if os.path.exists(local_path):
-                        filename = os.path.basename(local_path)
+                    if Path(local_path).exists():
+                        filename = Path(local_path).name
                         sandbox_path = f"{mcp_servers_dir}/{filename}"
                         files_to_upload.append((server.name, local_path, sandbox_path))
                     else:
@@ -550,17 +550,19 @@ class PTCSandbox:
 
         # If we have files to upload, create directory and upload in parallel
         if files_to_upload:
+            assert self.sandbox is not None
             await self._run_sync(self.sandbox.process.exec, f"mkdir -p {mcp_servers_dir}")
 
             async def upload_file(server_name: str, local_path: str, sandbox_path: str) -> None:
                 # Read file from host using aiofiles to avoid blocking
-                async with aiofiles.open(local_path, 'r') as f:
+                async with aiofiles.open(local_path) as f:
                     content = await f.read()
 
                 # Upload to sandbox
+                assert self.sandbox is not None
                 await self._run_sync(
                     self.sandbox.fs.upload_file,
-                    content.encode('utf-8'),
+                    content.encode("utf-8"),
                     sandbox_path
                 )
 
@@ -591,9 +593,10 @@ class PTCSandbox:
         install_cmd = f"uv pip install -q {' '.join(dependencies)}"
 
         try:
+            assert self.sandbox is not None
             _result = await self._run_sync(self.sandbox.process.exec, install_cmd)
             logger.info("Dependencies installed")
-        except Exception as e:
+        except OSError as e:
             logger.error(f"Failed to install dependencies: {e}")
             raise
 
@@ -602,10 +605,10 @@ class PTCSandbox:
         logger.info("Installing tool modules")
 
         # Get work directory (set by _setup_workspace)
-        work_dir = getattr(self, '_work_dir', '/home/daytona')
+        work_dir = getattr(self, "_work_dir", "/home/daytona")
 
         # Collect all files to upload (content generation is CPU-bound, fast)
-        uploads = []  # List of (content_bytes, path, log_info)
+        uploads: list[tuple[bytes, str, tuple[str, dict[str, str]] | None]] = []
 
         # 1. MCP client module
         mcp_client_code = self.tool_generator.generate_mcp_client_code(
@@ -613,16 +616,18 @@ class PTCSandbox:
         )
         mcp_client_path = f"{work_dir}/tools/mcp_client.py"
         uploads.append((
-            mcp_client_code.encode('utf-8'),
+            mcp_client_code.encode("utf-8"),
             mcp_client_path,
             ("MCP client module installed", {"path": mcp_client_path})
         ))
 
         # 2. Tool modules and documentation
+        assert self.mcp_registry is not None
         tools_by_server = self.mcp_registry.get_all_tools()
 
         # Create per-server doc directories
-        for server_name in tools_by_server.keys():
+        assert self.sandbox is not None
+        for server_name in tools_by_server:
             doc_dir = f"{work_dir}/tools/docs/{server_name}"
             await self._run_sync(self.sandbox.process.exec, f"mkdir -p {doc_dir}")
 
@@ -633,24 +638,27 @@ class PTCSandbox:
             )
             module_path = f"{work_dir}/tools/{server_name}.py"
             uploads.append((
-                module_code.encode('utf-8'),
+                module_code.encode("utf-8"),
                 module_path,
-                ("Tool module installed", {"server": server_name, "path": module_path, "tool_count": len(tools)})
+                ("Tool module installed", {"server": server_name, "path": module_path, "tool_count": str(len(tools))})
             ))
 
             # Generate documentation for each tool
             for tool in tools:
                 doc = self.tool_generator.generate_tool_documentation(tool)
                 doc_path = f"{work_dir}/tools/docs/{server_name}/{tool.name}.md"
-                uploads.append((doc.encode('utf-8'), doc_path, None))
+                upload_item: tuple[bytes, str, tuple[str, dict[str, str]] | None] = (doc.encode("utf-8"), doc_path, None)
+                uploads.append(upload_item)
 
         # 3. __init__.py for tools package
         init_content = '"""Auto-generated tool modules from MCP servers."""\n'
         init_path = f"{work_dir}/tools/__init__.py"
-        uploads.append((init_content.encode('utf-8'), init_path, None))
+        init_item: tuple[bytes, str, tuple[str, dict[str, str]] | None] = (init_content.encode("utf-8"), init_path, None)
+        uploads.append(init_item)
 
         # Upload all files in parallel
-        async def upload_file(content_bytes: bytes, path: str, log_info) -> None:
+        async def upload_file(content_bytes: bytes, path: str, log_info: tuple[str, dict[str, str]] | None) -> None:
+            assert self.sandbox is not None
             await self._run_sync(
                 self.sandbox.fs.upload_file,
                 content_bytes,
@@ -688,7 +696,7 @@ class PTCSandbox:
                 # Build the command to start the MCP server
                 if server.command == "npx":
                     # npx -y package-name [args...]
-                    cmd_parts = [server.command] + server.args
+                    cmd_parts = [server.command, *server.args]
                     cmd = " ".join(cmd_parts)
                 else:
                     # Custom command
@@ -696,7 +704,7 @@ class PTCSandbox:
 
                 # Add environment variables if specified
                 env_vars = []
-                if hasattr(server, 'env') and server.env:
+                if hasattr(server, "env") and server.env:
                     for key, value in server.env.items():
                         # Environment variables might have ${VAR} syntax, resolve them
                         # For now, we'll pass them as-is and they'll need to be set in sandbox
@@ -715,10 +723,10 @@ class PTCSandbox:
                 # Create session (but don't start the server yet, we'll do that when needed)
                 # For now, just track that this server should be available
                 self.mcp_server_sessions[server.name] = {
-                    'session_name': session_name,
-                    'command': cmd,
-                    'env': env_vars,
-                    'started': False
+                    "session_name": session_name,
+                    "command": cmd,
+                    "env": env_vars,
+                    "started": False
                 }
 
                 logger.info(
@@ -727,7 +735,7 @@ class PTCSandbox:
                     session=session_name
                 )
 
-            except Exception as e:
+            except OSError as e:
                 logger.error(
                     "Failed to configure MCP server session",
                     server=server.name,
@@ -760,7 +768,7 @@ class PTCSandbox:
 
         # Handle submodule imports (e.g., "foo.bar" -> "foo")
         # Also deduplicate
-        base_packages = list(set(m.split('.')[0] for m in matches))
+        base_packages = list({m.split(".")[0] for m in matches})
 
         if base_packages:
             logger.info(
@@ -781,23 +789,23 @@ class PTCSandbox:
         """
         try:
             logger.info(f"Auto-installing missing package: {package}")
+            assert self.sandbox is not None
             result = await self._run_sync(
                 self.sandbox.process.exec,
                 f"uv pip install -q {package}"
             )
-            exit_code = getattr(result, 'exit_code', 1)
+            exit_code = getattr(result, "exit_code", 1)
             if exit_code == 0:
                 logger.info(f"Successfully installed package: {package}")
                 return True
-            else:
-                logger.warning(f"Failed to install package: {package}, exit_code={exit_code}")
-                return False
-        except Exception as e:
+            logger.warning(f"Failed to install package: {package}, exit_code={exit_code}")
+            return False
+        except OSError as e:
             logger.warning(f"Failed to install {package}: {e}")
             return False
 
     async def execute(
-        self, code: str, timeout: int | None = None, auto_install: bool = True, max_retries: int = 2
+        self, code: str, timeout: int | None = None, *, auto_install: bool = True, max_retries: int = 2
     ) -> ExecutionResult:
         """Execute Python code in the sandbox with optional auto-install for missing dependencies.
 
@@ -832,7 +840,7 @@ class PTCSandbox:
             code_path = f"code/{execution_id}.py"
             await self._run_sync(
                 self.sandbox.fs.upload_file,
-                code.encode('utf-8'),
+                code.encode("utf-8"),
                 code_path
             )
 
@@ -853,7 +861,7 @@ class PTCSandbox:
             for server in self.config.mcp.servers:
                 if not server.enabled:
                     continue
-                if hasattr(server, 'env') and server.env:
+                if hasattr(server, "env") and server.env:
                     for key, value in server.env.items():
                         # Resolve ${VAR} placeholders from host environment
                         if value.startswith("${") and value.endswith("}"):
@@ -899,24 +907,23 @@ class PTCSandbox:
 
             # Extract charts from artifacts (matplotlib captures)
             charts = []
-            if hasattr(result, "artifacts") and result.artifacts:
-                if hasattr(result.artifacts, "charts") and result.artifacts.charts:
-                    for chart in result.artifacts.charts:
-                        chart_type = chart.type.value if hasattr(chart.type, 'value') else str(chart.type)
-                        charts.append(ChartData(
-                            type=chart_type,
-                            title=chart.title if hasattr(chart, 'title') else "",
-                            png_base64=chart.png if hasattr(chart, 'png') else None,
-                            elements=chart.elements if hasattr(chart, 'elements') else []
-                        ))
-                    logger.info(f"Captured {len(charts)} chart(s) from artifacts")
+            if hasattr(result, "artifacts") and result.artifacts and hasattr(result.artifacts, "charts") and result.artifacts.charts:
+                for chart in result.artifacts.charts:
+                    chart_type = chart.type.value if hasattr(chart.type, "value") else str(chart.type)
+                    charts.append(ChartData(
+                        type=chart_type,
+                        title=chart.title if hasattr(chart, "title") else "",
+                        png_base64=chart.png if hasattr(chart, "png") else None,
+                        elements=chart.elements if hasattr(chart, "elements") else []
+                    ))
+                logger.info(f"Captured {len(charts)} chart(s) from artifacts")
 
             # Get files after execution
             files_after = await self._list_result_files()
 
             # Determine file changes
             files_created = [f for f in files_after if f not in files_before]
-            files_modified = []  # TODO: Implement modification tracking
+            files_modified: list[str] = []  # TODO: Implement modification tracking
 
             duration = time.time() - start_time
 
@@ -989,13 +996,13 @@ class PTCSandbox:
             )
 
     async def execute_bash_command(
-        self, command: str, working_dir: str = "/workspace", timeout: int = 60, background: bool = False
+        self, command: str, working_dir: str = "/home/daytona", timeout: int = 60, *, background: bool = False
     ) -> dict[str, Any]:
         """Execute a bash command in the sandbox.
 
         Args:
             command: Bash command to execute
-            working_dir: Working directory for command execution (default: /workspace)
+            working_dir: Working directory for command execution (default: /home/daytona)
             timeout: Maximum execution time in seconds (default: 60)
             background: Run command in background (not fully implemented yet)
 
@@ -1007,8 +1014,8 @@ class PTCSandbox:
             self.bash_execution_count += 1
             bash_id = f"bash_{self.bash_execution_count:04d}"
             command_hash = hashlib.sha256(command.encode()).hexdigest()[:16]
-            from datetime import datetime
-            timestamp = datetime.now().isoformat()
+            from datetime import UTC, datetime
+            timestamp = datetime.now(tz=UTC).isoformat()
 
             logger.info(
                 "Executing bash command",
@@ -1038,14 +1045,15 @@ class PTCSandbox:
             # Write script to code/ directory for persistent logging
             # Use relative path for upload (Daytona SDK handles it relative to work_dir)
             script_relative_path = f"code/{bash_id}.sh"
+            assert self.sandbox is not None
             await self._run_sync(
                 self.sandbox.fs.upload_file,
-                script_content.encode('utf-8'),
+                script_content.encode("utf-8"),
                 script_relative_path
             )
 
             # Get work directory for absolute path in bash execution
-            work_dir_path = getattr(self, '_work_dir', '/home/daytona')
+            work_dir_path = getattr(self, "_work_dir", "/home/daytona")
             script_absolute_path = f"{work_dir_path}/{script_relative_path}"
 
             # Execute the script using the sandbox's execution method
@@ -1061,13 +1069,13 @@ class PTCSandbox:
                         text=True,
                         timeout={timeout}
                     )
-                    print(result.stdout, end='')
+                    print(result.stdout, end='')  # noqa: T201
                     sys.stderr.write(result.stderr)
                     sys.exit(result.returncode)
                 except subprocess.TimeoutExpired:
                     sys.stderr.write(f"Command timed out after {timeout} seconds")
                     sys.exit(124)
-                except Exception as e:
+                except (OSError, subprocess.SubprocessError) as e:
                     sys.stderr.write(f"Error executing command: {{e}}")
                     sys.exit(1)
             """)
@@ -1085,19 +1093,18 @@ class PTCSandbox:
                     "bash_id": bash_id,
                     "command_hash": command_hash,
                 }
-            else:
-                # Extract exit code from stderr if possible
-                exit_code = 1
-                stderr = result.stderr if result.stderr else result.stdout
+            # Extract exit code from stderr if possible
+            exit_code = 1
+            stderr = result.stderr if result.stderr else result.stdout
 
-                return {
-                    "success": False,
-                    "stdout": result.stdout,
-                    "stderr": stderr,
-                    "exit_code": exit_code,
-                    "bash_id": bash_id,
-                    "command_hash": command_hash,
-                }
+            return {
+                "success": False,
+                "stdout": result.stdout,
+                "stderr": stderr,
+                "exit_code": exit_code,
+                "bash_id": bash_id,
+                "command_hash": command_hash,
+            }
 
         except Exception as e:
             logger.error(f"Failed to execute bash command: {e}", exc_info=True)
@@ -1105,9 +1112,9 @@ class PTCSandbox:
             return {
                 "success": False,
                 "stdout": "",
-                "stderr": f"Exception during bash execution: {str(e)}",
+                "stderr": f"Exception during bash execution: {e!s}",
                 "exit_code": -1,
-                "bash_id": getattr(self, '_last_bash_id', None),
+                "bash_id": getattr(self, "_last_bash_id", None),
                 "command_hash": None,
             }
 
@@ -1118,12 +1125,13 @@ class PTCSandbox:
             List of file paths relative to workspace (e.g., "results/file.csv")
         """
         try:
+            assert self.sandbox is not None
             file_infos = await self._run_sync(self.sandbox.fs.list_files, "results")
             if not file_infos:
                 return []
             # Return paths relative to workspace, not just filenames
             return [f"results/{str(f.name) if hasattr(f, 'name') else str(f)}" for f in file_infos]
-        except Exception as e:
+        except (OSError, AttributeError) as e:
             logger.warning(f"Error listing result files: {e}")
             return []
 
@@ -1138,9 +1146,10 @@ class PTCSandbox:
         """
         try:
             # download_file returns bytes
+            assert self.sandbox is not None
             content_bytes = self.sandbox.fs.download_file(filepath)
-            return content_bytes.decode('utf-8') if content_bytes else None
-        except Exception as e:
+            return content_bytes.decode("utf-8") if content_bytes else None
+        except (OSError, UnicodeDecodeError) as e:
             logger.error(f"Failed to read file {filepath}: {e}")
             return None
 
@@ -1154,8 +1163,9 @@ class PTCSandbox:
             Raw bytes or None if error
         """
         try:
+            assert self.sandbox is not None
             return self.sandbox.fs.download_file(filepath)
-        except Exception as e:
+        except OSError as e:
             logger.error(f"Failed to download file bytes {filepath}: {e}")
             return None
 
@@ -1176,7 +1186,7 @@ class PTCSandbox:
                 logger.info(f"Downloaded {sandbox_path} to {local_path}")
                 return True
             return False
-        except Exception as e:
+        except OSError as e:
             logger.error(f"Failed to download file: {e}")
             return False
 
@@ -1199,7 +1209,7 @@ class PTCSandbox:
                     "exists": True,
                 }
             return {"path": filepath, "exists": False}
-        except Exception as e:
+        except (OSError, AttributeError) as e:
             logger.error(f"Error getting file info: {e}")
             return {"path": filepath, "exists": False, "error": str(e)}
 
@@ -1258,7 +1268,7 @@ class PTCSandbox:
 
         if path.startswith(work_dir + "/"):
             return path[len(work_dir):]  # Strip prefix, keep leading /
-        elif path == work_dir:
+        if path == work_dir:
             return "/"
 
         return path  # /tmp or other paths unchanged
@@ -1281,7 +1291,7 @@ class PTCSandbox:
         # Check against allowed directories
         for allowed_dir in self.config.filesystem.allowed_directories:
             # Exact match or path within allowed directory
-            if normalized_path == allowed_dir or normalized_path.startswith(allowed_dir + '/'):
+            if normalized_path == allowed_dir or normalized_path.startswith(allowed_dir + "/"):
                 return True
 
         logger.warning(
@@ -1324,10 +1334,11 @@ class PTCSandbox:
                 return False
 
             # Upload file via Daytona SDK
-            self.sandbox.fs.upload_file(content.encode('utf-8'), filepath)
+            assert self.sandbox is not None
+            self.sandbox.fs.upload_file(content.encode("utf-8"), filepath)
             logger.info(f"Wrote {len(content)} bytes to {filepath}")
             return True
-        except Exception as e:
+        except (OSError, UnicodeEncodeError) as e:
             logger.error(f"Failed to write file {filepath}: {e}")
             return False
 
@@ -1345,14 +1356,15 @@ class PTCSandbox:
                 logger.error(f"Access denied: {directory} is not in allowed directories")
                 return []
 
+            assert self.sandbox is not None
             file_infos = self.sandbox.fs.list_files(directory)
             if not file_infos:
                 return []
 
             results = []
             for f in file_infos:
-                name = str(f.name) if hasattr(f, 'name') else str(f)
-                is_dir = hasattr(f, 'is_dir') and f.is_dir
+                name = str(f.name) if hasattr(f, "name") else str(f)
+                is_dir = hasattr(f, "is_dir") and f.is_dir
                 results.append({
                     "name": name,
                     "type": "directory" if is_dir else "file",
@@ -1360,7 +1372,7 @@ class PTCSandbox:
                 })
 
             return results
-        except Exception as e:
+        except (OSError, AttributeError) as e:
             logger.debug(f"Error listing directory {directory}: {e}")
             return []
 
@@ -1381,14 +1393,15 @@ class PTCSandbox:
             # Create directory by uploading an empty file, then deleting it
             # This ensures parent directories are created
             temp_file = f"{dirpath}/.gitkeep"
+            assert self.sandbox is not None
             self.sandbox.fs.upload_file(b"", temp_file)
             logger.info(f"Created directory {dirpath}")
             return True
-        except Exception as e:
+        except OSError as e:
             logger.error(f"Failed to create directory {dirpath}: {e}")
             return False
 
-    def edit_file(self, filepath: str, old_string: str, new_string: str, replace_all: bool = False) -> dict[str, Any]:
+    def edit_file(self, filepath: str, old_string: str, new_string: str, *, replace_all: bool = False) -> dict[str, Any]:
         """Edit a file using exact string replacement (Claude Code standard).
 
         Performs exact string matching (whitespace-sensitive). old_string must be
@@ -1454,10 +1467,9 @@ class PTCSandbox:
                     "changed": True,
                     "message": message,
                 }
-            else:
-                return {"success": False, "error": "Failed to write edited content"}
+            return {"success": False, "error": "Failed to write edited content"}
 
-        except Exception as e:
+        except (OSError, ValueError) as e:
             logger.error(f"Failed to edit file {filepath}: {e}")
             return {"success": False, "error": str(e)}
 
@@ -1483,7 +1495,7 @@ class PTCSandbox:
 
             matches = []
 
-            def search_recursive(current_dir: str):
+            def search_recursive(current_dir: str) -> None:
                 try:
                     entries = self.list_directory(current_dir)
                     for entry in entries:
@@ -1508,14 +1520,14 @@ class PTCSandbox:
                         elif entry["type"] == "directory":
                             search_recursive(full_path)
 
-                except Exception as e:
+                except (OSError, KeyError) as e:
                     logger.debug(f"Error searching in {current_dir}: {e}")
 
             search_recursive(directory)
             logger.info(f"Found {len(matches)} files matching {pattern}")
             return matches
 
-        except Exception as e:
+        except (OSError, ValueError) as e:
             logger.error(f"Failed to search files: {e}")
             return []
 
@@ -1546,7 +1558,7 @@ class PTCSandbox:
 
             # Build Python code to execute glob in sandbox
             # This properly supports ** recursive patterns and mtime sorting
-            glob_code = textwrap.dedent(f'''\
+            glob_code = textwrap.dedent(f"""\
                 import glob
                 import os
 
@@ -1561,17 +1573,18 @@ class PTCSandbox:
                     files_with_mtime = [(f, os.path.getmtime(f)) for f in files]
                     sorted_files = sorted(files_with_mtime, key=lambda x: x[1], reverse=True)
                     for f, _ in sorted_files:
-                        print(f)
-                except Exception as e:
+                        print(f)  # noqa: T201
+                except OSError as e:
                     for f in files:
-                        print(f)
-            ''')
+                        print(f)  # noqa: T201
+            """)
 
             # Encode as base64 to safely pass multi-line code to shell
             encoded_code = base64.b64encode(glob_code.encode()).decode()
             cmd = f'python3 -c "import base64; exec(base64.b64decode(\'{encoded_code}\').decode())"'
 
             # Execute in sandbox
+            assert self.sandbox is not None
             result = self.sandbox.process.exec(cmd, timeout=30)
 
             # Parse output
@@ -1585,7 +1598,7 @@ class PTCSandbox:
             logger.info(f"Found {len(matches)} files matching {pattern}")
             return matches
 
-        except Exception as e:
+        except (OSError, ValueError, AttributeError) as e:
             logger.error(f"Failed to glob files: {e}")
             # Fallback to search_files if glob execution fails
             return self.search_files(pattern, path)
@@ -1596,7 +1609,8 @@ class PTCSandbox:
         path: str = ".",
         output_mode: str = "files_with_matches",
         glob: str | None = None,
-        type: str | None = None,
+        type: str | None = None,  # noqa: A002 - matches ripgrep's --type flag
+        *,
         case_insensitive: bool = False,
         show_line_numbers: bool = True,
         lines_after: int | None = None,
@@ -1613,7 +1627,7 @@ class PTCSandbox:
             path: File or directory to search in
             output_mode: "files_with_matches", "content", or "count"
             glob: Filter files by glob pattern
-            type: Filter by file type (e.g., "py", "js", "ts")
+            type: Filter by file type (e.g., "py", "js", "ts") - matches rg --type
             case_insensitive: Case insensitive search
             show_line_numbers: Show line numbers in content mode
             lines_after: Lines to show after match
@@ -1679,6 +1693,7 @@ class PTCSandbox:
             cmd_str = " ".join(f'"{c}"' if " " in c else c for c in cmd)
             logger.debug(f"Executing ripgrep: {cmd_str}")
 
+            assert self.sandbox is not None
             result = self.sandbox.process.exec(cmd_str, timeout=60)
 
             # Parse output
@@ -1690,20 +1705,21 @@ class PTCSandbox:
 
             # Process results based on output_mode
             if output_mode == "files_with_matches":
-                results = output.split("\n")
+                results: list[str] | list[tuple[str, int]] = output.split("\n")
             elif output_mode == "count":
                 # ripgrep count format: filename:count
-                results = []
+                count_results: list[tuple[str, int]] = []
                 for line in output.split("\n"):
                     if ":" in line:
                         parts = line.rsplit(":", 1)
                         if len(parts) == 2:
                             try:
-                                results.append((parts[0], int(parts[1])))
+                                count_results.append((parts[0], int(parts[1])))
                             except ValueError:
-                                results.append((line, 0))
+                                count_results.append((line, 0))
                     else:
-                        results.append((line, 0))
+                        count_results.append((line, 0))
+                results = count_results
             else:  # content mode
                 results = output.split("\n")
 
@@ -1716,13 +1732,23 @@ class PTCSandbox:
             logger.info(f"Grep found {len(results)} results for pattern {pattern}")
             return results
 
-        except Exception as e:
+        except (OSError, ValueError) as e:
             logger.error(f"Failed to grep content: {e}")
             # Fallback to Python-based grep if ripgrep fails
             return self._grep_content_fallback(
-                pattern, path, output_mode, glob, type, case_insensitive,
-                show_line_numbers, lines_after, lines_before, lines_context,
-                multiline, head_limit, offset
+                pattern=pattern,
+                path=path,
+                output_mode=output_mode,
+                glob=glob,
+                type=type,
+                case_insensitive=case_insensitive,
+                show_line_numbers=show_line_numbers,
+                lines_after=lines_after,
+                lines_before=lines_before,
+                lines_context=lines_context,
+                multiline=multiline,
+                head_limit=head_limit,
+                offset=offset,
             )
 
     def _grep_content_fallback(
@@ -1731,7 +1757,8 @@ class PTCSandbox:
         path: str = ".",
         output_mode: str = "files_with_matches",
         glob: str | None = None,
-        type: str | None = None,
+        type: str | None = None,  # noqa: A002 - matches ripgrep's --type flag
+        *,
         case_insensitive: bool = False,
         show_line_numbers: bool = True,
         lines_after: int | None = None,
@@ -1749,17 +1776,18 @@ class PTCSandbox:
             flags = re.IGNORECASE if case_insensitive else 0
             if multiline:
                 flags |= re.MULTILINE | re.DOTALL
-            regex = re.compile(pattern, flags)
+            try:
+                regex = re.compile(pattern, flags)
+            except re.error as e:
+                logger.error(f"Invalid regex pattern in grep_content fallback: {e}")
+                return []
 
             # Find files to search
-            if glob:
-                files = self.search_files(glob, path)
-            else:
-                files = self.search_files("*", path)
+            files = self.search_files(glob or "*", path)
 
             # Filter by type if specified
             if type:
-                type_extensions = {
+                type_extensions: dict[str, str | list[str]] = {
                     "py": ".py",
                     "js": ".js",
                     "ts": ".ts",
@@ -1774,11 +1802,12 @@ class PTCSandbox:
                 if type in type_extensions:
                     ext = type_extensions[type]
                     if isinstance(ext, list):
-                        files = [f for f in files if any(f.endswith(e) for e in ext)]
+                        ext_tuple = tuple(ext)
+                        files = [f for f in files if f.endswith(ext_tuple)]
                     else:
                         files = [f for f in files if f.endswith(ext)]
 
-            results = []
+            results: list[str] | list[tuple[str, int]] = []
 
             # Search each file
             for file_path in files:
@@ -1789,12 +1818,12 @@ class PTCSandbox:
 
                     if output_mode == "files_with_matches":
                         if regex.search(content):
-                            results.append(file_path)
+                            results.append(file_path)  # type: ignore[arg-type]
 
                     elif output_mode == "count":
                         matches = regex.findall(content)
                         if matches:
-                            results.append((file_path, len(matches)))
+                            results.append((file_path, len(matches)))  # type: ignore[arg-type]
 
                     elif output_mode == "content":
                         lines = content.splitlines()
@@ -1814,9 +1843,9 @@ class PTCSandbox:
                                     marker = ">" if j == i else " "
                                     context_lines.append(f"{prefix}{line_num}{marker}{lines[j]}")
 
-                                results.append("\n".join(context_lines))
+                                results.append("\n".join(context_lines))  # type: ignore[arg-type]
 
-                except Exception as e:
+                except (OSError, UnicodeDecodeError) as e:
                     logger.debug(f"Error searching file {file_path}: {e}")
                     continue
 
@@ -1829,7 +1858,7 @@ class PTCSandbox:
             logger.info(f"Grep fallback found {len(results)} results for pattern {pattern}")
             return results
 
-        except Exception as e:
+        except (OSError, ValueError, ImportError) as e:
             logger.error(f"Failed to grep content (fallback): {e}")
             return []
 
@@ -1864,7 +1893,7 @@ class PTCSandbox:
             result = "\n".join(selected_lines)
 
             logger.info(
-                f"Read file range",
+                "Read file range",
                 file_path=file_path,
                 offset=offset,
                 limit=limit,
@@ -1873,7 +1902,7 @@ class PTCSandbox:
 
             return result
 
-        except Exception as e:
+        except (OSError, ValueError) as e:
             logger.error(f"Failed to read file range: {e}")
             return None
 
@@ -1885,17 +1914,22 @@ class PTCSandbox:
             try:
                 await self._run_sync(self.sandbox.delete)
                 logger.info("Sandbox deleted", sandbox_id=self.sandbox_id)
-            except Exception as e:
+            except OSError as e:
                 logger.error(f"Error deleting sandbox: {e}")
 
         self.sandbox = None
         self.sandbox_id = None
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "PTCSandbox":
         """Async context manager entry."""
         await self.setup()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         """Async context manager exit."""
         await self.cleanup()

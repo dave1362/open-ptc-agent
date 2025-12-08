@@ -4,10 +4,9 @@ This backend delegates all filesystem and execution operations to PTCSandbox,
 enabling deepagent's built-in tools to work with Daytona sandboxes.
 """
 
-from typing import Any, List, Optional
 
 import structlog
-from deepagents.backends.protocol import WriteResult, EditResult
+from deepagents.backends.protocol import EditResult, WriteResult
 
 from ptc_agent.core.sandbox import PTCSandbox
 
@@ -19,11 +18,9 @@ class DaytonaBackend:
 
     Provides a unified interface for deepagent's FilesystemMiddleware to interact
     with Daytona sandboxes. All operations are delegated to PTCSandbox.
-
-    Similar to deepagent's FilesystemBackend, supports virtual_mode for path normalization.
     """
 
-    def __init__(self, sandbox: PTCSandbox, root_dir: str = "/home/daytona", virtual_mode: bool = True):
+    def __init__(self, sandbox: PTCSandbox, root_dir: str = "/home/daytona", *, virtual_mode: bool = True) -> None:
         """Initialize Daytona backend.
 
         Args:
@@ -40,11 +37,11 @@ class DaytonaBackend:
         """Normalize path relative to root_dir when virtual_mode is enabled.
 
         Converts virtual paths to absolute sandbox paths:
-            "/" -> "/workspace"
-            "/research_request.md" -> "/workspace/research_request.md"
-            "." -> "/workspace"
-            "data/file.txt" -> "/workspace/data/file.txt"
-            "/workspace/file.txt" -> "/workspace/file.txt" (unchanged)
+            "/" -> "/home/daytona"
+            "/research_request.md" -> "/home/daytona/research_request.md"
+            "." -> "/home/daytona"
+            "data/file.txt" -> "/home/daytona/data/file.txt"
+            "/home/daytona/file.txt" -> "/home/daytona/file.txt" (unchanged)
 
         Args:
             path: Path to normalize
@@ -61,17 +58,17 @@ class DaytonaBackend:
         path = path.strip()
 
         # Already absolute and in allowed directories - keep as is
-        if path.startswith("/home/daytona") or path.startswith("/tmp"):
+        if path.startswith(("/home/daytona", "/tmp")):
             return path
 
-        # Virtual absolute path: /foo -> /workspace/foo
+        # Virtual absolute path: /foo -> /home/daytona/foo
         if path.startswith("/"):
             return f"{self.root_dir}{path}"
 
-        # Relative path: foo -> /workspace/foo
+        # Relative path: foo -> /home/daytona/foo
         return f"{self.root_dir}/{path}"
 
-    def ls_info(self, path: str = ".") -> List[dict]:
+    def ls_info(self, path: str = ".") -> list[dict]:
         """List directory contents with file information.
 
         Args:
@@ -83,11 +80,9 @@ class DaytonaBackend:
         try:
             normalized_path = self._normalize_path(path)
             entries = self.sandbox.list_directory(normalized_path)
-            # Ensure each entry has required 'path' field for FileInfo
             result = []
             for entry in entries:
                 if isinstance(entry, dict):
-                    # Normalize to FileInfo format
                     file_info = {
                         "path": entry.get("path") or entry.get("name", ""),
                         "is_dir": entry.get("is_dir", entry.get("type") == "directory"),
@@ -101,8 +96,8 @@ class DaytonaBackend:
                     # If entry is a string, treat as path
                     result.append({"path": str(entry)})
             return result
-        except Exception as e:
-            logger.error(f"Failed to list directory {path}: {e}")
+        except (OSError, ValueError):
+            logger.exception(f"Failed to list directory {path}")
             return []
 
     def read(self, file_path: str, offset: int = 0, limit: int = 2000) -> str:
@@ -126,8 +121,8 @@ class DaytonaBackend:
             if content is None:
                 return f"Error: File '{file_path}' not found"
             return content
-        except Exception as e:
-            logger.error(f"Failed to read file {file_path}: {e}")
+        except (OSError, FileNotFoundError, PermissionError):
+            logger.exception(f"Failed to read file {file_path}")
             return f"Error: File '{file_path}' not found"
 
     def write(self, file_path: str, content: str) -> WriteResult:
@@ -147,8 +142,8 @@ class DaytonaBackend:
                 # files_update=None for external backends (not state-based)
                 return WriteResult(path=normalized_path, files_update=None)
             return WriteResult(error=f"Failed to write to '{normalized_path}'")
-        except Exception as e:
-            logger.error(f"Failed to write file {file_path}: {e}")
+        except (OSError, PermissionError) as e:
+            logger.exception(f"Failed to write file {file_path}")
             return WriteResult(error=str(e))
 
     def edit(
@@ -156,6 +151,7 @@ class DaytonaBackend:
         file_path: str,
         old_string: str,
         new_string: str,
+        *,
         replace_all: bool = False
     ) -> EditResult:
         """Edit file using exact string replacement.
@@ -171,7 +167,7 @@ class DaytonaBackend:
         """
         try:
             normalized_path = self._normalize_path(file_path)
-            result = self.sandbox.edit_file(normalized_path, old_string, new_string, replace_all)
+            result = self.sandbox.edit_file(normalized_path, old_string, new_string, replace_all=replace_all)
             if isinstance(result, dict):
                 if result.get("success"):
                     return EditResult(
@@ -182,16 +178,16 @@ class DaytonaBackend:
                 return EditResult(error=result.get("error", "Edit failed"))
             # If result is not a dict, assume success
             return EditResult(path=normalized_path, files_update=None, occurrences=1)
-        except Exception as e:
-            logger.error(f"Failed to edit file {file_path}: {e}")
+        except (OSError, FileNotFoundError, PermissionError, ValueError) as e:
+            logger.exception(f"Failed to edit file {file_path}")
             return EditResult(error=str(e))
 
     def grep_raw(
         self,
         pattern: str,
-        path: Optional[str] = None,
-        glob: Optional[str] = None,
-    ) -> List[dict]:
+        path: str | None = None,
+        glob: str | None = None,
+    ) -> list[dict]:
         """Search file contents with regex pattern.
 
         Args:
@@ -216,10 +212,10 @@ class DaytonaBackend:
             if isinstance(result, str):
                 # Parse string output into GrepMatch dicts
                 matches = []
-                for line in result.strip().split('\n'):
-                    if line and ':' in line:
+                for line in result.strip().split("\n"):
+                    if line and ":" in line:
                         # Format: "path:line:text"
-                        parts = line.split(':', 2)
+                        parts = line.split(":", 2)
                         if len(parts) >= 3:
                             try:
                                 matches.append({
@@ -232,17 +228,17 @@ class DaytonaBackend:
                                 matches.append({
                                     "path": parts[0],
                                     "line": 0,
-                                    "text": ':'.join(parts[1:])
+                                    "text": ":".join(parts[1:])
                                 })
                 return matches
-            elif isinstance(result, list):
+            if isinstance(result, list):
                 # Already in list format - could be strings or dicts
                 matches = []
                 for m in result:
                     if isinstance(m, str):
                         # Parse string format "path:line:text"
-                        if ':' in m:
-                            parts = m.split(':', 2)
+                        if ":" in m:
+                            parts = m.split(":", 2)
                             if len(parts) >= 3:
                                 try:
                                     matches.append({
@@ -254,7 +250,7 @@ class DaytonaBackend:
                                     matches.append({
                                         "path": parts[0],
                                         "line": 0,
-                                        "text": ':'.join(parts[1:])
+                                        "text": ":".join(parts[1:])
                                     })
                     elif isinstance(m, dict):
                         # Already GrepMatch dict format
@@ -265,11 +261,11 @@ class DaytonaBackend:
                         })
                 return matches
             return []
-        except Exception as e:
-            logger.error(f"Failed to grep content: {e}")
+        except (OSError, ValueError):
+            logger.exception("Failed to grep content")
             return []  # Return empty list on error for type consistency
 
-    def glob_info(self, pattern: str, path: str = "/") -> List[dict]:
+    def glob_info(self, pattern: str, path: str = "/") -> list[dict]:
         """Find files matching glob pattern.
 
         Args:
@@ -284,11 +280,11 @@ class DaytonaBackend:
             file_paths = self.sandbox.glob_files(pattern, normalized_path)
             # Convert to FileInfo format
             return [{"path": fp} for fp in file_paths]
-        except Exception as e:
-            logger.error(f"Failed to glob files: {e}")
+        except (OSError, ValueError):
+            logger.exception("Failed to glob files")
             return []
 
-    async def execute(self, code: str, timeout: Optional[int] = None) -> dict:
+    async def execute(self, code: str, timeout: int | None = None) -> dict:
         """Execute Python code in sandbox.
 
         Args:
@@ -308,7 +304,7 @@ class DaytonaBackend:
                 "files_created": result.files_created,
             }
         except Exception as e:
-            logger.error(f"Failed to execute code: {e}")
+            logger.exception("Failed to execute code")
             return {
                 "success": False,
                 "stdout": "",
@@ -332,14 +328,13 @@ class DaytonaBackend:
             Dict with success, stdout, stderr, exit_code
         """
         try:
-            result = await self.sandbox.execute_bash_command(
+            return await self.sandbox.execute_bash_command(
                 command=command,
                 working_dir=working_dir,
                 timeout=timeout
             )
-            return result
         except Exception as e:
-            logger.error(f"Failed to execute bash command: {e}")
+            logger.exception("Failed to execute bash command")
             return {
                 "success": False,
                 "stdout": "",
@@ -359,8 +354,8 @@ class DaytonaBackend:
         try:
             normalized_path = self._normalize_path(dirpath)
             return self.sandbox.create_directory(normalized_path)
-        except Exception as e:
-            logger.error(f"Failed to create directory {dirpath}: {e}")
+        except (OSError, PermissionError):
+            logger.exception(f"Failed to create directory {dirpath}")
             return False
 
     def get_work_dir(self) -> str:

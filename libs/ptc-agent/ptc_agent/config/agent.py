@@ -7,7 +7,7 @@ Use src.config.loaders for file-based loading.
 """
 
 import os
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -32,10 +32,10 @@ class LLMDefinition(BaseModel):
     provider: str
     sdk: str  # e.g., "langchain_anthropic.ChatAnthropic"
     api_key_env: str  # Name of environment variable containing API key
-    base_url: Optional[str] = None
-    output_version: Optional[str] = None
-    use_previous_response_id: Optional[bool] = False # Use only for OpenAI responses api endpoint
-    parameters: Dict[str, Any] = Field(default_factory=dict)
+    base_url: str | None = None
+    output_version: str | None = None
+    use_previous_response_id: bool | None = False # Use only for OpenAI responses api endpoint
+    parameters: dict[str, Any] = Field(default_factory=dict)
 
 
 class LLMConfig(BaseModel):
@@ -72,25 +72,25 @@ class AgentConfig(BaseModel):
 
     # Subagent configuration
     # List of enabled subagent names (available: research, general-purpose)
-    subagents_enabled: List[str] = Field(default_factory=lambda: ["general-purpose"])
+    subagents_enabled: list[str] = Field(default_factory=lambda: ["general-purpose"])
 
     # Note: deep-agent automatically enables middlewares (TodoList, Summarization, etc.)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     # Runtime data (not from config files)
-    llm_definition: Optional[LLMDefinition] = Field(default=None, exclude=True)
-    llm_client: Optional[Any] = Field(default=None, exclude=True)  # BaseChatModel instance
+    llm_definition: LLMDefinition | None = Field(default=None, exclude=True)
+    llm_client: Any | None = Field(default=None, exclude=True)  # BaseChatModel instance
 
     @classmethod
     def create(
         cls,
         llm: "BaseChatModel",
-        daytona_api_key: Optional[str] = None,
+        daytona_api_key: str | None = None,
         daytona_base_url: str = "https://app.daytona.io/api",
-        mcp_servers: Optional[List[MCPServerConfig]] = None,
-        allowed_directories: Optional[List[str]] = None,
-        **kwargs,
+        mcp_servers: list[MCPServerConfig] | None = None,
+        allowed_directories: list[str] | None = None,
+        **kwargs: Any,
     ) -> "AgentConfig":
         """Create an AgentConfig with sensible defaults.
 
@@ -153,8 +153,11 @@ class AgentConfig(BaseModel):
         llm_config = LLMConfig(name="custom")
 
         # Create Daytona config with defaults
+        api_key = daytona_api_key or os.getenv("DAYTONA_API_KEY", "")
+        if not api_key:
+            raise ValueError("DAYTONA_API_KEY must be provided or set in environment")
         daytona_config = DaytonaConfig(
-            api_key=daytona_api_key or os.getenv("DAYTONA_API_KEY", ""),
+            api_key=api_key,
             base_url=daytona_base_url,
             auto_stop_interval=kwargs.pop("auto_stop_interval", 3600),
             auto_archive_interval=kwargs.pop("auto_archive_interval", 86400),
@@ -248,7 +251,7 @@ class AgentConfig(BaseModel):
                 f"Please add these credentials to your .env file."
             )
 
-    def get_llm_client(self):
+    def get_llm_client(self) -> "BaseChatModel":
         """Return the LLM client instance.
 
         For configs created via create(), returns the stored llm_client.
@@ -290,15 +293,15 @@ class AgentConfig(BaseModel):
             raise ImportError(
                 f"Failed to import SDK module '{module_name}': {e}\n"
                 f"Make sure the required package is installed."
-            )
+            ) from e
 
         # Get the class
         try:
             llm_class = getattr(module, class_name)
-        except AttributeError:
+        except AttributeError as e:
             raise AttributeError(
                 f"Class '{class_name}' not found in module '{module_name}'"
-            )
+            ) from e
 
         # Get API key from environment
         api_key = os.getenv(self.llm_definition.api_key_env, "")

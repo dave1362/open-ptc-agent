@@ -1,5 +1,4 @@
-"""
-Unified Cloud Storage Upload Module
+"""Unified Cloud Storage Upload Module.
 
 A unified interface for uploading files to different cloud storage providers.
 Supports: AWS S3, Cloudflare R2, Alibaba Cloud OSS, or disabled
@@ -32,10 +31,9 @@ Provider Comparison:
     | none           | N/A           | N/A           | Disable uploads             |
 """
 
-import os
 import logging
+import os
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
@@ -54,13 +52,13 @@ def _load_storage_provider() -> str:
     config_path = Path(__file__).parent.parent.parent.parent / "config.yaml"
     if config_path.exists():
         try:
-            with open(config_path) as f:
+            with config_path.open() as f:
                 config = yaml.safe_load(f)
             provider = config.get("storage", {}).get("provider")
             if provider:
                 logger.debug(f"Storage provider from config.yaml: {provider}")
                 return provider.lower()
-        except Exception as e:
+        except (OSError, yaml.YAMLError) as e:
             logger.warning(f"Failed to load config.yaml: {e}")
 
     # Fall back to environment variable
@@ -112,15 +110,15 @@ if STORAGE_PROVIDER == "none":
         """No-op: Storage is disabled."""
         return ""
 
-    def get_signed_url(key: str, expires_in: int = 3600) -> Optional[str]:
+    def get_signed_url(key: str, expires_in: int = 3600) -> str | None:
         """No-op: Storage is disabled."""
         return None
 
-    def upload_image(file_path: str, prefix: str = None, custom_name: str = None) -> Optional[str]:
+    def upload_image(file_path: str, prefix: str | None = None, custom_name: str | None = None) -> str | None:
         """No-op: Storage is disabled."""
         return None
 
-    def upload_chart(file_path: str, custom_name: str = None) -> Optional[str]:
+    def upload_chart(file_path: str, custom_name: str | None = None) -> str | None:
         """No-op: Storage is disabled."""
         return None
 
@@ -131,45 +129,45 @@ if STORAGE_PROVIDER == "none":
 
 elif STORAGE_PROVIDER == "s3":
     from ptc_agent.utils.storage.s3_uploader import (
-        upload_file,
-        upload_base64,
-        upload_bytes,
-        does_object_exist,
         delete_object,
+        does_object_exist,
         get_public_url,
         get_signed_url,
-        upload_image,
+        upload_base64,
+        upload_bytes,
         upload_chart,
+        upload_file,
+        upload_image,
         verify_connection,
     )
     _PROVIDER_NAME = "AWS S3"
 
 elif STORAGE_PROVIDER == "oss":
     from ptc_agent.utils.storage.oss_uploader import (
-        upload_file,
-        upload_base64,
-        upload_bytes,
-        does_object_exist,
         delete_object,
+        does_object_exist,
         get_public_url,
         get_signed_url,
-        upload_image,
+        upload_base64,
+        upload_bytes,
         upload_chart,
+        upload_file,
+        upload_image,
         verify_connection,
     )
     _PROVIDER_NAME = "Alibaba Cloud OSS"
 
 else:  # Default to R2
     from ptc_agent.utils.storage.r2_uploader import (
-        upload_file,
-        upload_base64,
-        upload_bytes,
-        does_object_exist,
         delete_object,
+        does_object_exist,
         get_public_url,
         get_signed_url,
-        upload_image,
+        upload_base64,
+        upload_bytes,
         upload_chart,
+        upload_file,
+        upload_image,
         verify_connection,
     )
     _PROVIDER_NAME = "Cloudflare R2"
@@ -187,19 +185,19 @@ def get_provider_id() -> str:
 
 # Re-export all functions for convenient import
 __all__ = [
-    "upload_file",
-    "upload_base64",
-    "upload_bytes",
-    "does_object_exist",
     "delete_object",
+    "does_object_exist",
+    "get_provider_id",
+    "get_provider_name",
     "get_public_url",
     "get_signed_url",
-    "upload_image",
-    "upload_chart",
-    "verify_connection",
-    "get_provider_name",
-    "get_provider_id",
     "is_storage_enabled",
+    "upload_base64",
+    "upload_bytes",
+    "upload_chart",
+    "upload_file",
+    "upload_image",
+    "verify_connection",
 ]
 
 
@@ -211,23 +209,23 @@ if __name__ == "__main__":
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
 
-    print("Unified Storage Uploader - Connection Test")
-    print("=" * 50)
-    print(f"Provider: {get_provider_name()} ({get_provider_id()})")
-    print("=" * 50)
+    print("Unified Storage Uploader - Connection Test")  # noqa: T201
+    print("=" * 50)  # noqa: T201
+    print(f"Provider: {get_provider_name()} ({get_provider_id()})")  # noqa: T201
+    print("=" * 50)  # noqa: T201
 
     # Test connection
     if verify_connection():
-        print("Connection test: PASSED")
+        print("Connection test: PASSED")  # noqa: T201
     else:
-        print("Connection test: FAILED")
+        print("Connection test: FAILED")  # noqa: T201
         sys.exit(1)
 
-    print("\nReady to upload files!")
-    print("\nTo switch providers, edit config.yaml:")
-    print("  storage:")
-    print("    provider: s3    # AWS S3")
-    print("    provider: r2    # Cloudflare R2 (zero egress)")
-    print("    provider: oss   # Alibaba Cloud OSS")
-    print("    provider: none  # Disable uploads")
-    print("\nOr set STORAGE_PROVIDER environment variable as override.")
+    print("\nReady to upload files!")  # noqa: T201
+    print("\nTo switch providers, edit config.yaml:")  # noqa: T201
+    print("  storage:")  # noqa: T201
+    print("    provider: s3    # AWS S3")  # noqa: T201
+    print("    provider: r2    # Cloudflare R2 (zero egress)")  # noqa: T201
+    print("    provider: oss   # Alibaba Cloud OSS")  # noqa: T201
+    print("    provider: none  # Disable uploads")  # noqa: T201
+    print("\nOr set STORAGE_PROVIDER environment variable as override.")  # noqa: T201

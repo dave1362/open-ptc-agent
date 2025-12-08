@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 logger = structlog.get_logger(__name__)
 
 
-def create_wait_tool(middleware: "BackgroundSubagentMiddleware") -> StructuredTool:
+def create_wait_tool(middleware: BackgroundSubagentMiddleware) -> StructuredTool:
     """Create the wait tool for entering the waiting room.
 
     This tool allows the main agent to explicitly wait for background
@@ -63,24 +63,23 @@ def create_wait_tool(middleware: "BackgroundSubagentMiddleware") -> StructuredTo
                     f"{_format_result(result)}"
                 )
             return f"Task-{task_number} not found"
-        else:
-            # Wait for all tasks
-            logger.info("Waiting for all background tasks", timeout=timeout)
-            results = await registry.wait_for_all(timeout=timeout)
-            # Don't store in _pending_results - results are returned directly
-            # to the agent via the tool response. Storing them would cause
-            # the orchestrator to inject a duplicate HumanMessage later.
+        # Wait for all tasks
+        logger.info("Waiting for all background tasks", timeout=timeout)
+        results = await registry.wait_for_all(timeout=timeout)
+        # Don't store in _pending_results - results are returned directly
+        # to the agent via the tool response. Storing them would cause
+        # the orchestrator to inject a duplicate HumanMessage later.
 
-            if not results:
-                return "No background tasks were pending."
+        if not results:
+            return "No background tasks were pending."
 
-            output = f"All {len(results)} background task(s) completed:\n\n"
-            for task_id, result in results.items():
-                task = registry.get_by_id(task_id)
-                if task:
-                    output += f"### {task.display_id} ({task.subagent_type})\n"
-                    output += _format_result(result) + "\n\n"
-            return output
+        output = f"All {len(results)} background task(s) completed:\n\n"
+        for task_id, result in results.items():
+            task = registry.get_by_id(task_id)
+            if task:
+                output += f"### {task.display_id} ({task.subagent_type})\n"
+                output += _format_result(result) + "\n\n"
+        return output
 
     return StructuredTool.from_function(
         name="wait",
@@ -93,7 +92,7 @@ def create_wait_tool(middleware: "BackgroundSubagentMiddleware") -> StructuredTo
     )
 
 
-def create_task_progress_tool(registry: "BackgroundTaskRegistry") -> StructuredTool:
+def create_task_progress_tool(registry: BackgroundTaskRegistry) -> StructuredTool:
     """Create tool to check background task progress.
 
     This tool allows the main agent to monitor the status and progress
@@ -203,7 +202,7 @@ def _format_result(result: dict[str, Any] | Any) -> str:
     return f"**{content}**"
 
 
-def _format_task_progress(task: "BackgroundTask") -> str:
+def _format_task_progress(task: BackgroundTask) -> str:
     """Format progress info for a single task.
 
     Args:
@@ -215,13 +214,7 @@ def _format_task_progress(task: "BackgroundTask") -> str:
     elapsed = time.time() - task.created_at
 
     # Status indicator
-    if task.completed:
-        if task.error:
-            status = "[ERROR]"
-        else:
-            status = "[DONE]"
-    else:
-        status = "[RUNNING]"
+    status = ("[ERROR]" if task.error else "[DONE]") if task.completed else "[RUNNING]"
 
     # Tool call summary (always show, even if 0)
     tool_summary = f" | {task.total_tool_calls} tool calls"

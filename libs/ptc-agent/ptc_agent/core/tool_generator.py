@@ -1,11 +1,13 @@
 """Tool Function Generator - Convert MCP tool schemas to Python functions."""
 
+from pathlib import Path
 from typing import Any
 
 import structlog
 
-from .mcp_registry import MCPToolInfo
 from ptc_agent.config.core import MCPServerConfig
+
+from .mcp_registry import MCPToolInfo
 
 logger = structlog.get_logger(__name__)
 
@@ -66,7 +68,8 @@ except ImportError:
         """Generate Python function for a single tool.
 
         Args:
-            tool: Tool information
+            tool: Tool information from MCP server
+            server_name: Name of the MCP server this tool belongs to
 
         Returns:
             Python function code
@@ -101,16 +104,14 @@ except ImportError:
         docstring = self._generate_docstring(tool, params)
 
         # Generate function body
-        arg_dict_entries = []
-        for param_name in params.keys():
-            arg_dict_entries.append(f'        "{param_name}": {param_name},')
+        arg_dict_entries = [f'        "{param_name}": {param_name},' for param_name in params]
 
         args_dict = "\n".join(arg_dict_entries)
 
         # Extract return type from description for better type hints
         return_type, _ = self._extract_return_info(tool.description)
 
-        function_code = f'''def {func_name}({param_str}) -> {return_type}:
+        return f'''def {func_name}({param_str}) -> {return_type}:
     """{docstring}"""
     arguments = {{
 {args_dict}
@@ -121,7 +122,6 @@ except ImportError:
 
     return _call_mcp_tool("{server_name}", "{tool.name}", arguments)'''
 
-        return function_code
 
     def _generate_docstring(
         self, tool: MCPToolInfo, params: dict[str, Any]
@@ -160,7 +160,7 @@ except ImportError:
         return_type, return_desc = self._extract_return_info(tool.description)
         lines.append("Returns:")
         # Format multiline return descriptions properly
-        return_lines = return_desc.split('\n')
+        return_lines = return_desc.split("\n")
         first_line = return_lines[0].strip()
         if return_type != "Any":
             lines.append(f"    {return_type}: {first_line}")
@@ -178,7 +178,7 @@ except ImportError:
         for param_name, param_info in params.items():
             if param_info["required"]:
                 example_val = self._generate_example_value(param_info["type"])
-                example_args.append(f'{param_name}={example_val}')
+                example_args.append(f"{param_name}={example_val}")
 
         if example_args:
             func_name = tool.name.replace("-", "_").replace(".", "_")
@@ -250,7 +250,7 @@ except ImportError:
 
         # Look for "Returns:" section in description
         # Pattern matches "Returns:" followed by content until next section or end
-        returns_pattern = r'Returns?:\s*\n?\s*(.*?)(?:\n\s*(?:Args?:|Example|Note|Raises?:|HIGH PTC|VERY HIGH|MEDIUM PTC|$)|\Z)'
+        returns_pattern = r"Returns?:\s*\n?\s*(.*?)(?:\n\s*(?:Args?:|Example|Note|Raises?:|HIGH PTC|VERY HIGH|MEDIUM PTC|$)|\Z)"
         match = re.search(returns_pattern, description, re.IGNORECASE | re.DOTALL)
 
         if not match:
@@ -268,15 +268,15 @@ except ImportError:
         type_hint = "Any"
 
         type_patterns = [
-            (r'^(dict|Dict)\s*[:{]', 'dict'),
-            (r'^(list|List)\s*\[?\s*(dict|Dict)', 'list[dict]'),
-            (r'^(list|List)\b', 'list'),
-            (r'^(str|string)\b', 'str'),
-            (r'^(int|integer)\b', 'int'),
-            (r'^(float|number)\b', 'float'),
-            (r'^(bool|boolean)\b', 'bool'),
-            (r'[Dd]ictionary\s+(?:with|containing)', 'dict'),
-            (r'[Ll]ist\s+of\s+(?:dict|record)', 'list[dict]'),
+            (r"^(dict|Dict)\s*[:{]", "dict"),
+            (r"^(list|List)\s*\[?\s*(dict|Dict)", "list[dict]"),
+            (r"^(list|List)\b", "list"),
+            (r"^(str|string)\b", "str"),
+            (r"^(int|integer)\b", "int"),
+            (r"^(float|number)\b", "float"),
+            (r"^(bool|boolean)\b", "bool"),
+            (r"[Dd]ictionary\s+(?:with|containing)", "dict"),
+            (r"[Ll]ist\s+of\s+(?:dict|record)", "list[dict]"),
         ]
 
         for pattern, hint in type_patterns:
@@ -350,7 +350,7 @@ except ImportError:
         else:
             doc += f"result = {func_name}()\n"
 
-        doc += "print(result)\n"
+        doc += "print(result)  # noqa: T201\n"
         doc += "```\n"
 
         return doc
@@ -371,11 +371,11 @@ except ImportError:
         """
         # Build server configuration dict for code generation
         # Helper to resolve ${VAR} patterns from host environment
-        import re
         import os
+        import re
         def resolve_env_vars(text: str) -> str:
             return re.sub(
-                r'\$\{([^}]+)\}',
+                r"\$\{([^}]+)\}",
                 lambda m: os.environ.get(m.group(1), m.group(0)),
                 text
             )
@@ -387,25 +387,25 @@ except ImportError:
                 url = server.url or ""
                 # Resolve env vars from host environment
                 url = resolve_env_vars(url)
-                servers_dict += f'''    "{server.name}": {{
+                servers_dict += f"""    "{server.name}": {{
         "transport": "sse",
         "url": "{url}",
     }},
-'''
+"""
             elif server.transport == "http":
                 # HTTP transport - use URL
                 url = server.url or ""
                 # Resolve env vars from host environment
                 url = resolve_env_vars(url)
-                servers_dict += f'''    "{server.name}": {{
+                servers_dict += f"""    "{server.name}": {{
         "transport": "http",
         "url": "{url}",
     }},
-'''
+"""
             else:
                 # Stdio transport - use command
                 env_dict = "{}"
-                if hasattr(server, 'env') and server.env:
+                if hasattr(server, "env") and server.env:
                     env_items = [f'"{k}": "{v}"' for k, v in server.env.items()]
                     env_dict = "{" + ", ".join(env_items) + "}"
 
@@ -417,7 +417,7 @@ except ImportError:
                 if command == "uv" and len(args) >= 3 and args[0] == "run" and args[1] == "python":
                     # Extract the Python file path (e.g., "mcp_servers/yfinance_mcp_server.py")
                     local_path = args[2]
-                    filename = os.path.basename(local_path)
+                    filename = Path(local_path).name
                     # Keep uv run, just fix the path to sandbox
                     command = "uv"
                     args = ["run", "python", f"/home/daytona/mcp_servers/{filename}"]
@@ -431,16 +431,16 @@ except ImportError:
                     )
 
                 args_list = ", ".join([f'"{arg}"' for arg in args])
-                servers_dict += f'''    "{server.name}": {{
+                servers_dict += f"""    "{server.name}": {{
         "transport": "stdio",
         "command": "{command}",
         "args": [{args_list}],
         "env": {env_dict},
     }},
-'''
+"""
         servers_dict += "}"
 
-        code = f'''"""
+        return f'''"""
 MCP Client for sandbox environment.
 
 This module manages MCP server processes and provides tool calling functionality.
@@ -494,7 +494,8 @@ def _start_mcp_server(server_name: str) -> subprocess.Popen:
     # Get server config
     config = _SERVER_CONFIGS.get(server_name)
     if not config:
-        raise ValueError(f"Unknown MCP server: {{server_name}}")
+        msg = f"Unknown MCP server: {{server_name}}"
+        raise ValueError(msg)
 
     # Build command
     cmd = [config["command"]] + config["args"]
@@ -555,7 +556,8 @@ def _start_mcp_server(server_name: str) -> subprocess.Popen:
     if response_line:
         response = json.loads(response_line)
         if "error" in response:
-            raise RuntimeError(f"MCP initialization failed: {{response['error']}}")
+            msg = f"MCP initialization failed: {{response['error']}}"
+            raise RuntimeError(msg)
 
     # Send initialized notification
     initialized_notif = {{
@@ -579,11 +581,13 @@ def _initialize_sse_server(server_name: str) -> None:
 
     config = _SERVER_CONFIGS.get(server_name)
     if not config:
-        raise ValueError(f"Unknown MCP server: {{server_name}}")
+        msg = f"Unknown MCP server: {{server_name}}"
+        raise ValueError(msg)
 
     url = config.get("url")
     if not url:
-        raise ValueError(f"SSE server {{server_name}} has no URL configured")
+        msg = f"SSE server {{server_name}} has no URL configured"
+        raise ValueError(msg)
 
     # Resolve environment variables in URL
     import re
@@ -615,7 +619,8 @@ def _initialize_sse_server(server_name: str) -> None:
             result = response.json()
 
             if "error" in result:
-                raise RuntimeError(f"MCP SSE initialization failed: {{result['error']}}")
+                msg = f"MCP SSE initialization failed: {{result['error']}}"
+                raise RuntimeError(msg)
 
             # Send initialized notification
             initialized_notif = {{
@@ -626,8 +631,9 @@ def _initialize_sse_server(server_name: str) -> None:
 
         _sse_sessions[server_name] = True
 
-    except Exception as e:
-        raise RuntimeError(f"Failed to initialize SSE server {{server_name}}: {{e}}")
+    except Exception as e:  # noqa: BLE001 - Re-raising as RuntimeError with context
+        msg = f"Failed to initialize SSE server {{server_name}}: {{e}}"
+        raise RuntimeError(msg) from e
 
 
 def _call_mcp_tool_sse(server_name: str, tool_name: str, arguments: dict[str, Any]) -> Any:
@@ -679,7 +685,7 @@ def _call_mcp_tool_sse(server_name: str, tool_name: str, arguments: dict[str, An
         if "error" in result:
             error = result["error"]
             error_msg = f"MCP SSE tool call failed: {{error}}"
-            print(f"ERROR: {{error_msg}}", file=sys.stderr)
+            print(f"ERROR: {{error_msg}}", file=sys.stderr)  # noqa: T201
             raise RuntimeError(error_msg)
 
         # Return result
@@ -711,20 +717,20 @@ def _call_mcp_tool_sse(server_name: str, tool_name: str, arguments: dict[str, An
         else:
             raise RuntimeError("MCP SSE response missing result field")
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - Top-level error handler for MCP tool call
         error_type = type(e).__name__
         error_msg = str(e)
-        print(f"\\n{{'='*60}}", file=sys.stderr)
-        print(f"ERROR in _call_mcp_tool_sse", file=sys.stderr)
-        print(f"{{'='*60}}", file=sys.stderr)
-        print(f"Error Type: {{error_type}}", file=sys.stderr)
-        print(f"Error Message: {{error_msg}}", file=sys.stderr)
-        print(f"Server: {{server_name}}", file=sys.stderr)
-        print(f"Tool: {{tool_name}}", file=sys.stderr)
-        print(f"Arguments: {{arguments}}", file=sys.stderr)
-        print(f"\\nFull Traceback:", file=sys.stderr)
+        print(f"\\n{{'='*60}}", file=sys.stderr)  # noqa: T201
+        print(f"ERROR in _call_mcp_tool_sse", file=sys.stderr)  # noqa: T201
+        print(f"{{'='*60}}", file=sys.stderr)  # noqa: T201
+        print(f"Error Type: {{error_type}}", file=sys.stderr)  # noqa: T201
+        print(f"Error Message: {{error_msg}}", file=sys.stderr)  # noqa: T201
+        print(f"Server: {{server_name}}", file=sys.stderr)  # noqa: T201
+        print(f"Tool: {{tool_name}}", file=sys.stderr)  # noqa: T201
+        print(f"Arguments: {{arguments}}", file=sys.stderr)  # noqa: T201
+        print(f"\\nFull Traceback:", file=sys.stderr)  # noqa: T201
         traceback.print_exc(file=sys.stderr)
-        print(f"{{'='*60}}\\n", file=sys.stderr)
+        print(f"{{'='*60}}\\n", file=sys.stderr)  # noqa: T201
         raise
 
 
@@ -764,9 +770,9 @@ def _call_mcp_tool_stdio(server_name: str, tool_name: str, arguments: dict[str, 
             try:
                 proc.stdin.write(request_json)
                 proc.stdin.flush()
-            except Exception as e:
+            except (OSError, IOError) as e:
                 error_msg = f"Failed to send request to MCP server {{server_name}}: {{e}}"
-                print(f"ERROR: {{error_msg}}", file=sys.stderr)
+                print(f"ERROR: {{error_msg}}", file=sys.stderr)  # noqa: T201
                 raise RuntimeError(error_msg)
 
             # Read response
@@ -774,23 +780,23 @@ def _call_mcp_tool_stdio(server_name: str, tool_name: str, arguments: dict[str, 
                 response_line = proc.stdout.readline()
                 if not response_line:
                     error_msg = f"MCP server {{server_name}} closed connection"
-                    print(f"ERROR: {{error_msg}}", file=sys.stderr)
+                    print(f"ERROR: {{error_msg}}", file=sys.stderr)  # noqa: T201
                     raise RuntimeError(error_msg)
 
                 response = json.loads(response_line)
             except json.JSONDecodeError as e:
                 error_msg = f"Invalid JSON response from MCP server {{server_name}}: {{e}}"
-                print(f"ERROR: {{error_msg}}", file=sys.stderr)
-                print(f"Response line: {{response_line}}", file=sys.stderr)
+                print(f"ERROR: {{error_msg}}", file=sys.stderr)  # noqa: T201
+                print(f"Response line: {{response_line}}", file=sys.stderr)  # noqa: T201
                 raise RuntimeError(error_msg)
 
             # Check for errors
             if "error" in response:
                 error = response["error"]
                 error_msg = f"MCP tool call failed: {{error}}"
-                print(f"ERROR: {{error_msg}}", file=sys.stderr)
-                print(f"Tool: {{server_name}}.{{tool_name}}", file=sys.stderr)
-                print(f"Arguments: {{arguments}}", file=sys.stderr)
+                print(f"ERROR: {{error_msg}}", file=sys.stderr)  # noqa: T201
+                print(f"Tool: {{server_name}}.{{tool_name}}", file=sys.stderr)  # noqa: T201
+                print(f"Arguments: {{arguments}}", file=sys.stderr)  # noqa: T201
                 raise RuntimeError(error_msg)
 
             # Return result
@@ -821,24 +827,24 @@ def _call_mcp_tool_stdio(server_name: str, tool_name: str, arguments: dict[str, 
                 return result
             else:
                 error_msg = "MCP response missing result field"
-                print(f"ERROR: {{error_msg}}", file=sys.stderr)
-                print(f"Response: {{response}}", file=sys.stderr)
+                print(f"ERROR: {{error_msg}}", file=sys.stderr)  # noqa: T201
+                print(f"Response: {{response}}", file=sys.stderr)  # noqa: T201
                 raise RuntimeError(error_msg)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - Top-level error handler for MCP tool call
         error_type = type(e).__name__
         error_msg = str(e)
-        print(f"\\n{{'='*60}}", file=sys.stderr)
-        print(f"ERROR in _call_mcp_tool_stdio", file=sys.stderr)
-        print(f"{{'='*60}}", file=sys.stderr)
-        print(f"Error Type: {{error_type}}", file=sys.stderr)
-        print(f"Error Message: {{error_msg}}", file=sys.stderr)
-        print(f"Server: {{server_name}}", file=sys.stderr)
-        print(f"Tool: {{tool_name}}", file=sys.stderr)
-        print(f"Arguments: {{arguments}}", file=sys.stderr)
-        print(f"\\nFull Traceback:", file=sys.stderr)
+        print(f"\\n{{'='*60}}", file=sys.stderr)  # noqa: T201
+        print(f"ERROR in _call_mcp_tool_stdio", file=sys.stderr)  # noqa: T201
+        print(f"{{'='*60}}", file=sys.stderr)  # noqa: T201
+        print(f"Error Type: {{error_type}}", file=sys.stderr)  # noqa: T201
+        print(f"Error Message: {{error_msg}}", file=sys.stderr)  # noqa: T201
+        print(f"Server: {{server_name}}", file=sys.stderr)  # noqa: T201
+        print(f"Tool: {{tool_name}}", file=sys.stderr)  # noqa: T201
+        print(f"Arguments: {{arguments}}", file=sys.stderr)  # noqa: T201
+        print(f"\\nFull Traceback:", file=sys.stderr)  # noqa: T201
         traceback.print_exc(file=sys.stderr)
-        print(f"{{'='*60}}\\n", file=sys.stderr)
+        print(f"{{'='*60}}\\n", file=sys.stderr)  # noqa: T201
         raise
 
 
@@ -857,7 +863,8 @@ def _call_mcp_tool(server_name: str, tool_name: str, arguments: dict[str, Any]) 
     """
     config = _SERVER_CONFIGS.get(server_name)
     if not config:
-        raise ValueError(f"Unknown MCP server: {{server_name}}")
+        msg = f"Unknown MCP server: {{server_name}}"
+        raise ValueError(msg)
 
     transport = config.get("transport", "stdio")
 
@@ -873,9 +880,8 @@ def cleanup_mcp_servers():
         try:
             proc.terminate()
             proc.wait(timeout=5)
-        except Exception as e:
-            print(f"Error cleaning up MCP server {{server_name}}: {{e}}", file=sys.stderr)
+        except (OSError, TimeoutError) as e:
+            print(f"Error cleaning up MCP server {{server_name}}: {{e}}", file=sys.stderr)  # noqa: T201
     _server_processes.clear()
 '''
 
-        return code

@@ -1,5 +1,4 @@
-"""
-Self-contained View Image Middleware for Vision LLMs.
+"""Self-contained View Image Middleware for Vision LLMs.
 
 This module provides a complete solution for injecting images into LLM conversations
 as HumanMessage content blocks, enabling vision-capable models to process images
@@ -28,15 +27,16 @@ import asyncio
 import base64
 import io
 import logging
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any
 
 import aiohttp
-from PIL import Image
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import HumanMessage, ToolMessage
-from langchain_core.tools import tool
+from langchain_core.tools import BaseTool, tool
 from langgraph.types import Command
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -55,8 +55,7 @@ OPENAI_SUPPORTED_FORMATS = {
 
 
 async def _check_url_accessible_quick(url: str, timeout: int) -> bool:
-    """
-    Lenient validation: Quick HEAD request to check if image exists.
+    """Lenient validation: Quick HEAD request to check if image exists.
 
     Uses HEAD request (doesn't download) for fast accessibility check.
     Suitable for images that will only be displayed in frontend, not sent to Vision APIs.
@@ -69,32 +68,29 @@ async def _check_url_accessible_quick(url: str, timeout: int) -> bool:
         True if accessible with image content type, False otherwise
     """
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.head(
-                url,
-                timeout=aiohttp.ClientTimeout(total=timeout),
-                allow_redirects=True,
-            ) as response:
-                if response.status == 200:
-                    content_type = response.headers.get("Content-Type", "").lower()
-                    # For lenient mode, accept any image/* content type
-                    return content_type.startswith("image/")
-                else:
-                    logger.debug(
-                        f"HEAD request failed with status {response.status} for {url}"
-                    )
-                return False
-    except asyncio.TimeoutError:
+        async with aiohttp.ClientSession() as session, session.head(
+            url,
+            timeout=aiohttp.ClientTimeout(total=timeout),
+            allow_redirects=True,
+        ) as response:
+            if response.status == 200:
+                content_type = response.headers.get("Content-Type", "").lower()
+                # For lenient mode, accept any image/* content type
+                return content_type.startswith("image/")
+            logger.debug(
+                f"HEAD request failed with status {response.status} for {url}"
+            )
+            return False
+    except TimeoutError:
         logger.debug(f"Timeout during HEAD request for {url}")
         return False
-    except Exception as e:
+    except (aiohttp.ClientError, OSError) as e:
         logger.debug(f"HEAD request error for {url}: {type(e).__name__}: {e}")
         return False
 
 
-async def _check_url_downloadable(url: str, timeout: int, retry: bool = True) -> bool:
-    """
-    Strict validation: Full GET request with image decoding validation.
+async def _check_url_downloadable(url: str, timeout: int, *, retry: bool = True) -> bool:
+    """Strict validation: Full GET request with image decoding validation.
 
     Uses GET request to download and decode the image, matching what OpenAI's Vision API
     will do. This catches:
@@ -115,62 +111,61 @@ async def _check_url_downloadable(url: str, timeout: int, retry: bool = True) ->
     async def _attempt_validation() -> bool:
         """Single validation attempt."""
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    url,
-                    timeout=aiohttp.ClientTimeout(total=timeout),
-                    allow_redirects=True,
-                ) as response:
-                    if response.status != 200:
-                        logger.debug(
-                            f"GET request failed with status {response.status} for {url}"
-                        )
-                        return False
-
-                    # Strict Content-Type validation: Only OpenAI-supported formats
-                    content_type = (
-                        response.headers.get("Content-Type", "")
-                        .lower()
-                        .split(";")[0]
-                        .strip()
+            async with aiohttp.ClientSession() as session, session.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=timeout),
+                allow_redirects=True,
+            ) as response:
+                if response.status != 200:
+                    logger.debug(
+                        f"GET request failed with status {response.status} for {url}"
                     )
-                    if content_type not in OPENAI_SUPPORTED_FORMATS:
-                        logger.debug(
-                            f"Unsupported Content-Type '{content_type}' for {url}. "
-                            f"OpenAI only supports: {sorted(OPENAI_SUPPORTED_FORMATS)}"
-                        )
-                        return False
+                    return False
 
-                    # Actually download the image
-                    image_data = await response.read()
+                # Strict Content-Type validation: Only OpenAI-supported formats
+                content_type = (
+                    response.headers.get("Content-Type", "")
+                    .lower()
+                    .split(";")[0]
+                    .strip()
+                )
+                if content_type not in OPENAI_SUPPORTED_FORMATS:
+                    logger.debug(
+                        f"Unsupported Content-Type '{content_type}' for {url}. "
+                        f"OpenAI only supports: {sorted(OPENAI_SUPPORTED_FORMATS)}"
+                    )
+                    return False
 
-                    if not image_data:
-                        logger.debug(f"Empty image data received from {url}")
-                        return False
+                # Actually download the image
+                image_data = await response.read()
 
-                    # Verify the image is decodable with PIL
-                    try:
-                        img = Image.open(io.BytesIO(image_data))
-                        # Verify the image by attempting to load it
-                        img.verify()
-                        logger.debug(
-                            f"Image validation success: {url} "
-                            f"(format={img.format}, size={img.size}, {len(image_data)} bytes)"
-                        )
-                        return True
-                    except Exception as e:
-                        logger.debug(
-                            f"Image decoding failed for {url}: {type(e).__name__}: {e}"
-                        )
-                        return False
+                if not image_data:
+                    logger.debug(f"Empty image data received from {url}")
+                    return False
 
-        except asyncio.TimeoutError:
+                # Verify the image is decodable with PIL
+                try:
+                    img = Image.open(io.BytesIO(image_data))
+                    # Verify the image by attempting to load it
+                    img.verify()
+                    logger.debug(
+                        f"Image validation success: {url} "
+                        f"(format={img.format}, size={img.size}, {len(image_data)} bytes)"
+                    )
+                    return True
+                except (OSError, ValueError) as e:  # PIL/image decoding errors
+                    logger.debug(
+                        f"Image decoding failed for {url}: {type(e).__name__}: {e}"
+                    )
+                    return False
+
+        except TimeoutError:
             logger.debug(f"Timeout ({timeout}s) downloading image from {url}")
             return False
         except aiohttp.ClientError as e:
             logger.debug(f"Network error downloading {url}: {type(e).__name__}: {e}")
             return False
-        except Exception as e:
+        except OSError as e:  # Catch network/IO errors
             logger.debug(f"Unexpected error validating {url}: {type(e).__name__}: {e}")
             return False
 
@@ -189,10 +184,9 @@ async def _check_url_downloadable(url: str, timeout: int, retry: bool = True) ->
 
 
 async def validate_image_url(
-    url: str, timeout: Optional[int] = None, strict: bool = True
-) -> Optional[str]:
-    """
-    Validate image URL and auto-upgrade HTTP to HTTPS when possible.
+    url: str, timeout: int | None = None, *, strict: bool = True
+) -> str | None:
+    """Validate image URL and auto-upgrade HTTP to HTTPS when possible.
 
     Supports two validation modes:
     - Strict mode (default): Uses GET request with full image download and decoding validation
@@ -251,12 +245,11 @@ async def validate_image_url(
                 f"Image URL only available via HTTP (rejected in strict mode): {url}"
             )
             return None
-        else:
-            # In lenient mode, can fall back to HTTP if needed
-            logger.debug(f"HTTPS upgrade failed, trying HTTP in lenient mode: {url}")
-            if await check_func(url, timeout):
-                return url
-            return None
+        # In lenient mode, can fall back to HTTP if needed
+        logger.debug(f"HTTPS upgrade failed, trying HTTP in lenient mode: {url}")
+        if await check_func(url, timeout):
+            return url
+        return None
 
     # Already HTTPS or other protocol - validate directly
     if await check_func(url, timeout):
@@ -271,7 +264,7 @@ async def validate_image_url(
 # =============================================================================
 
 
-def create_view_image_tool(sandbox: Optional[Any] = None):
+def create_view_image_tool(sandbox: Any | None = None) -> BaseTool:
     """Factory function to create the view_image tool.
 
     Args:
@@ -284,9 +277,9 @@ def create_view_image_tool(sandbox: Optional[Any] = None):
 
     @tool
     def view_image(
-        urls: Optional[list[str]] = None,
-        base64_images: Optional[list[str]] = None,
-        sandbox_paths: Optional[list[str]] = None,
+        urls: list[str] | None = None,
+        base64_images: list[str] | None = None,
+        sandbox_paths: list[str] | None = None,
     ) -> str:
         """Load images for visual analysis.
 
@@ -326,10 +319,9 @@ def create_view_image_tool(sandbox: Optional[Any] = None):
 
 
 class ViewImageMiddleware(AgentMiddleware):
-    """
-    Middleware that intercepts view_image tool calls and formats images
-    as HumanMessage content blocks in OpenAI-compatible format.
+    """Middleware that intercepts view_image tool calls and formats images.
 
+    Formats images as HumanMessage content blocks in OpenAI-compatible format.
     This middleware solves the problem that many LLM APIs don't support
     images in tool messages (ToolMessage), but they do support images
     in user messages (HumanMessage).
@@ -362,12 +354,12 @@ class ViewImageMiddleware(AgentMiddleware):
 
     def __init__(
         self,
+        *,
         validate_urls: bool = True,
         strict_validation: bool = True,
-        sandbox: Optional[Any] = None,
-    ):
-        """
-        Initialize the ViewImageMiddleware.
+        sandbox: Any | None = None,
+    ) -> None:
+        """Initialize the ViewImageMiddleware.
 
         Args:
             validate_urls: Whether to validate URL accessibility before sending.
@@ -389,8 +381,7 @@ class ViewImageMiddleware(AgentMiddleware):
         request: Any,
         handler: Callable[[Any], Any],
     ) -> Any:
-        """
-        Synchronous wrapper - delegates to async implementation.
+        """Synchronous wrapper - delegates to async implementation.
 
         Note: Image validation requires async, so this sync wrapper is limited.
         For production use, prefer async execution via awrap_tool_call.
@@ -415,8 +406,7 @@ class ViewImageMiddleware(AgentMiddleware):
         request: Any,
         handler: Callable[[Any], Awaitable[Any]],
     ) -> Any:
-        """
-        Async wrapper that intercepts view_image and injects images as HumanMessage.
+        """Async wrapper that intercepts view_image and injects images as HumanMessage.
 
         Args:
             request: Tool call request containing tool_call dict with name, args, id
@@ -478,7 +468,7 @@ class ViewImageMiddleware(AgentMiddleware):
                     else:
                         failed_sandbox_paths.append(path)
                         logger.warning(f"[VIEW_IMAGE] Failed to download: {path}")
-                except Exception as e:
+                except (OSError, ValueError) as e:
                     failed_sandbox_paths.append(path)
                     logger.warning(
                         f"[VIEW_IMAGE] Error loading sandbox image {path}: {e}"
@@ -505,7 +495,7 @@ class ViewImageMiddleware(AgentMiddleware):
                     else:
                         failed_urls.append(url)
                         logger.warning(f"[VIEW_IMAGE] URL validation failed: {url}")
-                except Exception as e:
+                except (aiohttp.ClientError, OSError, ValueError) as e:
                     failed_urls.append(url)
                     logger.warning(
                         f"[VIEW_IMAGE] URL validation error for {url}: {e}"
@@ -558,7 +548,7 @@ class ViewImageMiddleware(AgentMiddleware):
                 }
             )
 
-        human_message = HumanMessage(content=content_blocks)
+        human_message = HumanMessage(content=content_blocks)  # type: ignore[arg-type]
 
         total_failed = len(failed_urls) + len(failed_sandbox_paths)
         logger.info(
@@ -581,4 +571,4 @@ class ViewImageMiddleware(AgentMiddleware):
 # Public API
 # =============================================================================
 
-__all__ = ["create_view_image_tool", "ViewImageMiddleware", "validate_image_url"]
+__all__ = ["ViewImageMiddleware", "create_view_image_tool", "validate_image_url"]

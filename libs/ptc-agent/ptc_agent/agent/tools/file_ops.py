@@ -1,7 +1,7 @@
 """File operation tools: read, write, edit."""
 
 import asyncio
-from typing import Any, Optional
+from typing import Any
 
 import structlog
 from langchain_core.tools import tool
@@ -20,7 +20,7 @@ def create_filesystem_tools(sandbox: Any) -> tuple:
     """
 
     @tool
-    async def read_file(file_path: str, offset: Optional[int] = None, limit: Optional[int] = None) -> str:
+    async def read_file(file_path: str, offset: int | None = None, limit: int | None = None) -> str:
         """Read a file with line numbers (cat -n format).
 
         Args:
@@ -76,8 +76,8 @@ def create_filesystem_tools(sandbox: Any) -> tuple:
             return result
 
         except Exception as e:
-            error_msg = f"Failed to read file: {str(e)}"
-            logger.error(error_msg, file_path=file_path, error=str(e), exc_info=True)
+            error_msg = f"Failed to read file: {e!s}"
+            logger.exception(error_msg, file_path=file_path)
             return f"ERROR: {error_msg}"
 
     @tool
@@ -108,7 +108,7 @@ def create_filesystem_tools(sandbox: Any) -> tuple:
             success = await asyncio.to_thread(sandbox.write_file, normalized_path, content)
 
             if success:
-                bytes_written = len(content.encode('utf-8'))
+                bytes_written = len(content.encode("utf-8"))
                 # Return virtual path in success message
                 virtual_path = sandbox.virtualize_path(normalized_path)
                 logger.info(
@@ -117,18 +117,19 @@ def create_filesystem_tools(sandbox: Any) -> tuple:
                     bytes_written=bytes_written,
                 )
                 return f"Wrote {bytes_written} bytes to {virtual_path}"
-            else:
-                error_msg = "Write operation failed"
-                logger.error(error_msg, file_path=file_path)
-                return f"ERROR: {error_msg}"
+            error_msg = "Write operation failed"
+            logger.error(error_msg, file_path=file_path)
+            return f"ERROR: {error_msg}"
 
         except Exception as e:
-            error_msg = f"Failed to write file: {str(e)}"
+            error_msg = f"Failed to write file: {e!s}"
             logger.error(error_msg, file_path=file_path, error=str(e), exc_info=True)
             return f"ERROR: {error_msg}"
 
     @tool
-    async def edit_file(file_path: str, old_string: str, new_string: str, replace_all: bool = False) -> str:
+    async def edit_file(
+        file_path: str, old_string: str, new_string: str, replace_all: bool = False
+    ) -> str:
         """Replace exact string in a file. Must Read file first.
 
         Args:
@@ -173,7 +174,7 @@ def create_filesystem_tools(sandbox: Any) -> tuple:
             return message
 
         except Exception as e:
-            error_msg = f"Failed to edit file: {str(e)}"
+            error_msg = f"Failed to edit file: {e!s}"
             logger.error(error_msg, file_path=file_path, error=str(e), exc_info=True)
             return f"ERROR: {error_msg}"
 

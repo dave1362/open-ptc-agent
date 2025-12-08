@@ -1,11 +1,12 @@
 """Session Management - Handle conversation lifecycle and sandbox persistence."""
 
 import asyncio
-from typing import Any
+from types import TracebackType
 
 import structlog
 
 from ptc_agent.config.core import CoreConfig
+
 from .mcp_registry import MCPRegistry
 from .sandbox import PTCSandbox
 
@@ -15,7 +16,7 @@ logger = structlog.get_logger(__name__)
 class Session:
     """Represents a conversation session with a persistent sandbox."""
 
-    def __init__(self, conversation_id: str, config: CoreConfig):
+    def __init__(self, conversation_id: str, config: CoreConfig) -> None:
         """Initialize session.
 
         Args:
@@ -46,14 +47,13 @@ class Session:
             reconnecting=sandbox_id is not None,
         )
 
-        # Initialize MCP registry (but don't connect yet for reconnect - we'll do it in parallel)
+        # Initialize MCP registry
         self.mcp_registry = MCPRegistry(self.config)
 
         if sandbox_id:
             # RECONNECT MODE: Run MCP connections and sandbox start in parallel
-            # This saves ~1s by overlapping the two slow operations
 
-            # Create sandbox instance without mcp_registry (not needed for reconnect)
+            # Create sandbox instance without mcp_registry
             self.sandbox = await asyncio.to_thread(
                 PTCSandbox, self.config, None
             )
@@ -64,7 +64,6 @@ class Session:
                 self.sandbox.reconnect(sandbox_id),
             )
 
-            # Set mcp_registry on sandbox now that it's connected
             self.sandbox.mcp_registry = self.mcp_registry
 
             logger.info(
@@ -83,17 +82,15 @@ class Session:
                 self.mcp_registry.connect_all(),
             )
 
-            # Set mcp_registry now that it's connected
             self.sandbox.mcp_registry = self.mcp_registry
 
-            # Tool installation requires mcp_registry
             await self.sandbox.setup_tools_and_mcp(snapshot_name)
 
         self._initialized = True
 
         logger.info("Session initialized", conversation_id=self.conversation_id)
 
-    async def get_sandbox(self) -> PTCSandbox:
+    async def get_sandbox(self) -> PTCSandbox | None:
         """Get the sandbox for this session (initializes if needed).
 
         Returns:
@@ -121,7 +118,7 @@ class Session:
         logger.info("Session cleaned up", conversation_id=self.conversation_id)
 
     async def stop(self) -> None:
-        """Stop sandbox for session persistence (doesn't delete).
+        """Stop sandbox for session persistence.
 
         This is used when persist_session is enabled - stops the sandbox
         so it can be restarted quickly on the next session, rather than
@@ -137,12 +134,17 @@ class Session:
 
         logger.info("Session stopped", conversation_id=self.conversation_id)
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "Session":
         """Async context manager entry."""
         await self.initialize()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         """Async context manager exit."""
         await self.cleanup()
 

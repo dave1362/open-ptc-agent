@@ -2,22 +2,23 @@
 
 import asyncio
 import base64
+import binascii
 from pathlib import Path
 from typing import Any
 
 import structlog
-from langchain_core.tools import tool
+from langchain_core.tools import BaseTool, tool
 
 # Import storage upload functions (supports R2, S3, OSS, or none via STORAGE_PROVIDER env var)
-from ptc_agent.utils.storage.storage_uploader import upload_bytes, get_public_url, is_storage_enabled
+from ptc_agent.utils.storage.storage_uploader import get_public_url, is_storage_enabled, upload_bytes
 
 logger = structlog.get_logger(__name__)
 
 # Image extensions to detect for cloud storage upload
-IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.svg', '.gif', '.webp', '.bmp', '.tiff'}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp", ".bmp", ".tiff"}
 
 
-def create_execute_code_tool(sandbox: Any, mcp_registry: Any):
+def create_execute_code_tool(sandbox: Any, mcp_registry: Any) -> BaseTool:
     """Factory function to create execute_code tool with injected dependencies.
 
     Args:
@@ -73,7 +74,7 @@ def create_execute_code_tool(sandbox: Any, mcp_registry: Any):
 
                 if is_storage_enabled():
                     # 1. Upload charts from artifacts (matplotlib plt.show())
-                    if hasattr(result, 'charts') and result.charts:
+                    if hasattr(result, "charts") and result.charts:
                         for i, chart in enumerate(result.charts):
                             if chart.png_base64:
                                 try:
@@ -85,8 +86,8 @@ def create_execute_code_tool(sandbox: Any, mcp_registry: Any):
                                         title = chart.title if chart.title else f"chart_{i}"
                                         uploaded_images.append(f"![{title}]({url})")
                                         logger.info(f"Uploaded chart to storage: {storage_key}")
-                                except Exception as e:
-                                    logger.error(f"Failed to upload chart artifact: {e}")
+                                except (OSError, ValueError, binascii.Error):
+                                    logger.exception("Failed to upload chart artifact")
 
                     # 2. Upload saved image files from results/
                     if result.files_created:
@@ -105,8 +106,8 @@ def create_execute_code_tool(sandbox: Any, mcp_registry: Any):
                                             url = get_public_url(storage_key)
                                             uploaded_images.append(f"![{file_str}]({url})")
                                             logger.info(f"Uploaded image to storage: {storage_key}")
-                                except Exception as e:
-                                    logger.error(f"Failed to upload saved image {file_str}: {e}")
+                                except (OSError, ValueError):
+                                    logger.exception(f"Failed to upload saved image {file_str}")
 
                     # 3. Fallback: Check /results/ (absolute path) for images
                     # LLMs sometimes use absolute paths despite prompt instructions
@@ -116,7 +117,7 @@ def create_execute_code_tool(sandbox: Any, mcp_registry: Any):
                             # (list_directory logs at debug level when directory doesn't exist)
                             root_results_raw = await asyncio.to_thread(sandbox.sandbox.fs.list_files, "/results")
                             root_results = [
-                                {"name": str(f.name) if hasattr(f, 'name') else str(f)}
+                                {"name": str(f.name) if hasattr(f, "name") else str(f)}
                                 for f in (root_results_raw or [])
                             ]
                             for file_info in root_results:
@@ -131,10 +132,9 @@ def create_execute_code_tool(sandbox: Any, mcp_registry: Any):
                                                 url = get_public_url(storage_key)
                                                 uploaded_images.append(f"![{file_name}]({url})")
                                                 logger.info(f"Uploaded image from /results/ fallback: {storage_key}")
-                                    except Exception as e:
+                                    except (OSError, ValueError) as e:
                                         logger.error(f"Failed to upload /results/{file_name}: {e}")
-                        except Exception:
-                            # /results/ doesn't exist or can't be listed - silently ignore
+                        except Exception:  # noqa: S110 - /results/ fallback should fail silently
                             pass
 
                     # Add uploaded images to response
@@ -149,22 +149,21 @@ def create_execute_code_tool(sandbox: Any, mcp_registry: Any):
                     images_uploaded=len(uploaded_images)
                 )
                 return response
-            else:
-                # Format error response
-                # Python tracebacks often go to stdout in some environments
-                # Show stderr if available, otherwise show stdout
-                error_output = result.stderr if result.stderr else result.stdout
+            # Format error response
+            # Python tracebacks often go to stdout in some environments
+            # Show stderr if available, otherwise show stdout
+            error_output = result.stderr if result.stderr else result.stdout
 
-                logger.warning(
-                    "Code execution failed",
-                    stderr_length=len(result.stderr),
-                    stdout_length=len(result.stdout),
-                )
+            logger.warning(
+                "Code execution failed",
+                stderr_length=len(result.stderr),
+                stdout_length=len(result.stdout),
+            )
 
-                return f"ERROR\n{error_output}"
+            return f"ERROR\n{error_output}"
 
         except Exception as e:
             logger.error("Code execution exception", error=str(e), exc_info=True)
-            return f"ERROR: {str(e)}"
+            return f"ERROR: {e!s}"
 
     return execute_code

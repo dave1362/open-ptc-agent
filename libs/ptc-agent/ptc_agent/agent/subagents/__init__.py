@@ -1,12 +1,13 @@
 """Sub-agent definitions for deepagent delegation."""
 
-from typing import Any, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 from .general import create_general_subagent, get_general_subagent_config
 from .research import create_research_subagent, get_research_subagent_config
 
 # Registry mapping subagent names to their creation functions
-SUBAGENT_REGISTRY = {
+SUBAGENT_REGISTRY: dict[str, Callable[..., dict[str, Any]]] = {
     "research": create_research_subagent,
     "general-purpose": create_general_subagent,
 }
@@ -28,10 +29,10 @@ SUBAGENT_PARAMS = {
 
 def create_subagent_by_name(
     name: str,
-    sandbox: Optional[Any] = None,
-    mcp_registry: Optional[Any] = None,
-    **kwargs,
-) -> Dict[str, Any]:
+    sandbox: Any | None = None,
+    mcp_registry: Any | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
     """Create a subagent by name using the registry.
 
     Args:
@@ -49,7 +50,8 @@ def create_subagent_by_name(
     """
     if name not in SUBAGENT_REGISTRY:
         available = ", ".join(SUBAGENT_REGISTRY.keys())
-        raise ValueError(f"Unknown subagent: '{name}'. Available: {available}")
+        msg = f"Unknown subagent: '{name}'. Available: {available}"
+        raise ValueError(msg)
 
     create_fn = SUBAGENT_REGISTRY[name]
 
@@ -70,12 +72,12 @@ def create_subagent_by_name(
 
 
 def create_subagents_from_names(
-    names: List[str],
-    sandbox: Optional[Any] = None,
-    mcp_registry: Optional[Any] = None,
-    counter_middleware: Optional[Any] = None,
-    **kwargs,
-) -> List[Dict[str, Any]]:
+    names: list[str],
+    sandbox: Any | None = None,
+    mcp_registry: Any | None = None,
+    counter_middleware: Any | None = None,
+    **kwargs: Any,
+) -> list[dict[str, Any]]:
     """Create multiple subagents from a list of names.
 
     Args:
@@ -97,7 +99,7 @@ def create_subagents_from_names(
         # Inject counter middleware if provided
         if counter_middleware is not None:
             existing_middleware = spec.get("middleware", [])
-            spec["middleware"] = [counter_middleware] + list(existing_middleware)
+            spec["middleware"] = [counter_middleware, *list(existing_middleware)]
 
         subagents.append(spec)
 
@@ -105,11 +107,11 @@ def create_subagents_from_names(
 
 
 __all__ = [
+    "SUBAGENT_REGISTRY",
     "create_general_subagent",
-    "get_general_subagent_config",
     "create_research_subagent",
-    "get_research_subagent_config",
     "create_subagent_by_name",
     "create_subagents_from_names",
-    "SUBAGENT_REGISTRY",
+    "get_general_subagent_config",
+    "get_research_subagent_config",
 ]

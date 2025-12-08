@@ -7,16 +7,24 @@ This module creates a PTC agent that:
 - Supports sub-agent delegation for specialized tasks
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import structlog
 from langchain.agents import create_agent
 
-from ptc_agent.core.mcp_registry import MCPRegistry
-from ptc_agent.core.sandbox import PTCSandbox, ExecutionResult
-
 from ptc_agent.agent.backends import DaytonaBackend
-from ptc_agent.config import AgentConfig
+from ptc_agent.agent.middleware import (
+    BackgroundSubagentMiddleware,
+    BackgroundSubagentOrchestrator,
+    PlanModeMiddleware,
+    ToolCallCounterMiddleware,
+    ViewImageMiddleware,
+    create_deepagent_middleware,
+    create_plan_mode_interrupt_config,
+    create_view_image_tool,
+)
+from ptc_agent.agent.prompts import format_subagent_summary, format_tool_summary, get_loader
+from ptc_agent.agent.subagents import create_subagents_from_names
 from ptc_agent.agent.tools import (
     create_execute_bash_tool,
     create_execute_code_tool,
@@ -24,31 +32,22 @@ from ptc_agent.agent.tools import (
     create_glob_tool,
     create_grep_tool,
 )
+from ptc_agent.config import AgentConfig
+from ptc_agent.core.mcp_registry import MCPRegistry
+from ptc_agent.core.sandbox import ExecutionResult, PTCSandbox
 from ptc_agent.utils.storage.storage_uploader import is_storage_enabled
-from ptc_agent.agent.prompts import get_loader, format_tool_summary, format_subagent_summary, build_mcp_section
-from ptc_agent.agent.subagents import create_subagents_from_names
-from ptc_agent.agent.middleware import (
-    BackgroundSubagentMiddleware,
-    BackgroundSubagentOrchestrator,
-    ToolCallCounterMiddleware,
-    ViewImageMiddleware,
-    create_view_image_tool,
-    create_deepagent_middleware,
-    PlanModeMiddleware,
-    create_plan_mode_interrupt_config,
-)
 
 # Import HITL middleware for plan mode
 try:
     from langchain.agents.middleware import HumanInTheLoopMiddleware
 except ImportError:
-    HumanInTheLoopMiddleware = None
+    HumanInTheLoopMiddleware = None  # type: ignore[misc,assignment]
 
 # Import Checkpointer type for type hints
 try:
     from langgraph.types import Checkpointer
 except ImportError:
-    Checkpointer = None
+    Checkpointer = None  # type: ignore[misc,assignment]
 
 logger = structlog.get_logger(__name__)
 
@@ -69,15 +68,15 @@ class PTCAgent:
     - Supports sub-agent delegation for specialized tasks
     """
 
-    def __init__(self, config: AgentConfig):
+    def __init__(self, config: AgentConfig) -> None:
         """Initialize PTC agent.
 
         Args:
             config: Agent configuration
         """
         self.config = config
-        self.llm = config.get_llm_client()
-        self.subagents = {}  # Populated in create_agent() for introspection
+        self.llm: Any = config.get_llm_client()
+        self.subagents: dict[str, Any] = {}  # Populated in create_agent() for introspection
 
         # Get provider/model info for logging
         if config.llm_definition is not None:
@@ -95,7 +94,7 @@ class PTCAgent:
             model=model,
         )
 
-    def _get_subagent_summary(self, mcp_registry: Optional[MCPRegistry] = None) -> str:
+    def _get_subagent_summary(self, mcp_registry: MCPRegistry | None = None) -> str:
         """Get formatted subagent summary for prompts.
 
         Returns a summary of configured subagents. If called after create_agent(),
@@ -118,11 +117,10 @@ class PTCAgent:
                 if tools:
                     lines.append(f"  Tools: {', '.join(tools)}")
             return "\n".join(lines) if lines else "No sub-agents configured."
-        else:
-            # Before create_agent, show configured subagent names
-            if self.config.subagents_enabled:
-                return f"Configured subagents: {', '.join(self.config.subagents_enabled)}"
-            return "No sub-agents configured."
+        # Before create_agent, show configured subagent names
+        if self.config.subagents_enabled:
+            return f"Configured subagents: {', '.join(self.config.subagents_enabled)}"
+        return "No sub-agents configured."
 
     def _build_system_prompt(
         self,
@@ -180,10 +178,11 @@ class PTCAgent:
         self,
         sandbox: PTCSandbox,
         mcp_registry: MCPRegistry,
-        subagent_names: Optional[List[str]] = None,
-        additional_subagents: Optional[List[Dict[str, Any]]] = None,
+        subagent_names: list[str] | None = None,
+        additional_subagents: list[dict[str, Any]] | None = None,
         background_timeout: float = 300.0,
-        checkpointer: Optional[Any] = None,
+        checkpointer: Any | None = None,
+        system_prompt_suffix: str | None = None,
     ) -> Any:
         """Create a deepagent with PTC pattern capabilities.
 
@@ -196,6 +195,8 @@ class PTCAgent:
             background_timeout: Timeout for waiting on background tasks (seconds)
             checkpointer: Optional LangGraph checkpointer for state persistence.
                 Required for submit_plan interrupt/resume workflow.
+            system_prompt_suffix: Optional string to append to the system prompt.
+                Useful for adding user/project-specific instructions (e.g., agent.md content).
 
         Returns:
             Configured BackgroundSubagentOrchestrator wrapping the deepagent
@@ -207,7 +208,7 @@ class PTCAgent:
         bash_tool = create_execute_bash_tool(sandbox)
 
         # Start with base tools
-        tools = [execute_code_tool, bash_tool]
+        tools: list[Any] = [execute_code_tool, bash_tool]
 
         # Always create backend for FilesystemMiddleware
         # (it handles ls, and provides fallback for other operations)
@@ -249,7 +250,7 @@ class PTCAgent:
             subagent_names = self.config.subagents_enabled
 
         # Create middleware list
-        middleware_list = []
+        middleware_list: list[Any] = []
 
         # Add view image middleware (always added when tool is enabled, for image injection)
         if self.config.enable_view_image:
@@ -286,13 +287,13 @@ class PTCAgent:
             tools.extend(plan_middleware.tools)
 
             # Add HITL interrupt on submit_plan
-            interrupt_config = create_plan_mode_interrupt_config()
+            interrupt_config: Any = create_plan_mode_interrupt_config()
             hitl_middleware = HumanInTheLoopMiddleware(interrupt_on=interrupt_config)
             middleware_list.append(hitl_middleware)
 
             logger.info(
                 "Plan tools enabled",
-                plan_tools=[t.name for t in plan_middleware.tools],
+                plan_tools=[getattr(t, "name", str(t)) for t in plan_middleware.tools],
             )
 
         # Create subagents from names using the registry
@@ -320,6 +321,10 @@ class PTCAgent:
 
         # Build system prompt
         system_prompt = self._build_system_prompt(tool_summary, subagent_summary)
+
+        # Append suffix if provided (e.g., agent.md content)
+        if system_prompt_suffix:
+            system_prompt = f"{system_prompt}\n\n{system_prompt_suffix}"
 
         # Store subagent info for introspection (used by print_agent_config)
         self.subagents = {}
@@ -352,7 +357,7 @@ class PTCAgent:
         )
 
         # Create agent with middleware stack
-        agent = create_agent(
+        agent: Any = create_agent(
             self.llm,
             system_prompt=system_prompt,
             tools=tools,
@@ -370,7 +375,7 @@ class PTCAgent:
 class PTCExecutor:
     """Executor that combines agent and sandbox for complete task execution."""
 
-    def __init__(self, agent: PTCAgent, mcp_registry: MCPRegistry):
+    def __init__(self, agent: PTCAgent, mcp_registry: MCPRegistry) -> None:
         """Initialize executor.
 
         Args:
@@ -419,12 +424,12 @@ class PTCExecutor:
             return await self._parse_agent_result(agent_result, sandbox)
 
         except Exception as e:
-            logger.error("Agent execution failed", error=str(e))
+            logger.exception("Agent execution failed")
 
             return ExecutionResult(
                 success=False,
                 stdout="",
-                stderr=f"Agent execution error: {str(e)}",
+                stderr=f"Agent execution error: {e!s}",
                 duration=0,
                 files_created=[],
                 files_modified=[],
@@ -525,7 +530,7 @@ class PTCExecutor:
 
 
 # For LangGraph deployment compatibility
-async def create_ptc_agent(config: Optional[AgentConfig] = None) -> PTCAgent:
+async def create_ptc_agent(config: AgentConfig | None = None) -> PTCAgent:
     """Create a PTCAgent instance.
 
     Factory function for LangGraph deployment.

@@ -5,12 +5,12 @@ before the agent can proceed with execution. It enables a two-phase
 workflow: explore/plan, then execute after approval.
 """
 
-from typing import Annotated, Any, Callable, List
+from typing import Annotated
 
 from langchain.agents.middleware import InterruptOnConfig
 from langchain.agents.middleware.types import AgentMiddleware, AgentState
 from langchain_core.messages import ToolCall, ToolMessage
-from langchain_core.tools import tool
+from langchain_core.tools import BaseTool, tool
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 
@@ -41,7 +41,7 @@ class PlanModeMiddleware(AgentMiddleware):
         """Initialize the plan mode middleware."""
         self._submit_plan_tool = self._create_submit_plan_tool()
 
-    def _create_submit_plan_tool(self) -> Callable:
+    def _create_submit_plan_tool(self) -> BaseTool:
         """Create the submit_plan tool."""
 
         @tool
@@ -63,7 +63,7 @@ class PlanModeMiddleware(AgentMiddleware):
                     "plan_description": description,
                     "messages": [
                         ToolMessage(
-                            content="Plan submitted. Awaiting user approval.",
+                            content="Plan submitted for review.",
                             tool_call_id=tool_call_id,
                         )
                     ],
@@ -73,7 +73,7 @@ class PlanModeMiddleware(AgentMiddleware):
         return submit_plan
 
     @property
-    def tools(self) -> List[Callable]:
+    def tools(self) -> list[BaseTool]:  # type: ignore[override]
         """Return the tools provided by this middleware."""
         return [self._submit_plan_tool]
 
@@ -97,9 +97,36 @@ def format_plan_description(
         Formatted description string for the approval UI
     """
     args = tool_call.get("args", {})
-    description = args.get("description", "No description provided")
+    return args.get("description", "No description provided")
 
-    return description
+
+def format_plan_response(
+    tool_call: ToolCall,
+    decision: dict,
+    state: AgentState,
+    runtime: Runtime,
+) -> str:
+    """Format the HITL decision as the tool result message.
+
+    This function is called by HumanInTheLoopMiddleware to generate
+    the tool result that the agent sees after user approval/rejection.
+
+    Args:
+        tool_call: The tool call that was interrupted
+        decision: The user's decision dict with 'type' and optional 'message'
+        state: Current agent state
+        runtime: LangGraph runtime
+
+    Returns:
+        Formatted response string for the tool result
+    """
+    decision_type = decision.get("type", "")
+    if decision_type == "approve":
+        return "Plan approved. Proceed with execution."
+    if decision_type == "reject":
+        feedback = decision.get("message", "No feedback provided")
+        return f"Plan rejected. User feedback: {feedback}"
+    return "Unknown decision"
 
 
 def create_plan_mode_interrupt_config() -> dict[str, InterruptOnConfig]:
@@ -110,8 +137,9 @@ def create_plan_mode_interrupt_config() -> dict[str, InterruptOnConfig]:
         Only includes 'submit_plan' which triggers approval.
     """
     return {
-        "submit_plan": InterruptOnConfig(
+        "submit_plan": InterruptOnConfig(  # type: ignore[typeddict-unknown-key]
             allowed_decisions=["approve", "reject"],
             description=format_plan_description,
+            response=format_plan_response,
         )
     }

@@ -4,7 +4,8 @@ This module provides an orchestrator that wraps the agent and handles
 re-invocation when background subagent results are collected.
 """
 
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 import structlog
 from langchain_core.messages import HumanMessage
@@ -45,7 +46,7 @@ class BackgroundSubagentOrchestrator:
         agent: Any,
         middleware: BackgroundSubagentMiddleware,
         max_iterations: int = 3,
-    ):
+    ) -> None:
         """Initialize the orchestrator.
 
         Args:
@@ -126,7 +127,7 @@ class BackgroundSubagentOrchestrator:
             )
 
             # Create new state for synthesis
-            current_state = {"messages": messages + [synthesis_message]}
+            current_state = {"messages": [*messages, synthesis_message]}
 
             # Clear middleware results for next iteration
             self.middleware.clear_results()
@@ -233,7 +234,7 @@ class BackgroundSubagentOrchestrator:
                 )
             )
 
-            current_state = {"messages": messages + [synthesis_message]}
+            current_state = {"messages": [*messages, synthesis_message]}
             self.middleware.clear_results()
 
     def _format_results(self, results: dict[str, Any]) -> str:
@@ -258,7 +259,7 @@ class BackgroundSubagentOrchestrator:
                 lines.append("Status: Success")
                 lines.append(f"Result:\n{content}")
             else:
-                lines.append(f"Status: error")
+                lines.append("Status: error")
                 lines.append(f"Error: {content}")
 
             lines.append("")

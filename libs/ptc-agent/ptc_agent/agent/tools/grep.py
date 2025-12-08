@@ -1,15 +1,16 @@
 """Grep tool for content searching with ripgrep."""
 
 import asyncio
-from typing import Any, Literal, Optional
+import re
+from typing import Any, Literal
 
 import structlog
-from langchain_core.tools import tool
+from langchain_core.tools import BaseTool, tool
 
 logger = structlog.get_logger(__name__)
 
 
-def create_grep_tool(sandbox: Any):
+def create_grep_tool(sandbox: Any) -> BaseTool:
     """Factory function to create Grep tool.
 
     Args:
@@ -22,17 +23,17 @@ def create_grep_tool(sandbox: Any):
     @tool
     async def grep(
         pattern: str,
-        path: Optional[str] = None,
-        output_mode: Optional[Literal["files_with_matches", "content", "count"]] = "files_with_matches",
-        glob: Optional[str] = None,
-        type: Optional[str] = None,
-        i: Optional[bool] = False,
-        n: Optional[bool] = True,
-        A: Optional[int] = None,
-        B: Optional[int] = None,
-        C: Optional[int] = None,
-        multiline: Optional[bool] = False,
-        head_limit: Optional[int] = None,
+        path: str | None = None,
+        output_mode: Literal["files_with_matches", "content", "count"] | None = "files_with_matches",
+        glob: str | None = None,
+        type: str | None = None,  # noqa: A002 - matches ripgrep's --type flag
+        i: bool | None = False,
+        n: bool | None = True,
+        A: int | None = None,
+        B: int | None = None,
+        C: int | None = None,
+        multiline: bool | None = False,
+        head_limit: int | None = None,
         offset: int = 0,
     ) -> str:
         """Search file contents using ripgrep regex.
@@ -45,18 +46,28 @@ def create_grep_tool(sandbox: Any):
             path: Directory or file (default: ".")
             output_mode: "files_with_matches" | "content" | "count"
             glob: File filter (e.g., "*.py")
-            type: File type (e.g., "py", "js")
-            i: Case insensitive
-            n: Show line numbers
-            A/B/C: Lines after/before/context
-            multiline: Pattern spans lines
-            head_limit: Limit results
+            type: File type filter (e.g., "py", "js") - matches rg --type
+            i: Case insensitive search
+            n: Show line numbers in output
+            A: Lines to show after each match
+            B: Lines to show before each match
+            C: Lines of context (before and after)
+            multiline: Pattern spans multiple lines
+            head_limit: Limit number of results
             offset: Skip first N results
 
         Returns:
             Search results or ERROR
         """
         try:
+            # Validate regex pattern to prevent crashes from malformed patterns
+            try:
+                re.compile(pattern)
+            except re.error as e:
+                error_msg = f"Invalid regex pattern: {e}"
+                logger.error(error_msg, pattern=pattern)
+                return f"ERROR: {error_msg}"
+
             # Normalize virtual path to absolute sandbox path
             search_path = path if path is not None else "."
             normalized_path = sandbox.normalize_path(search_path)
@@ -117,7 +128,7 @@ def create_grep_tool(sandbox: Any):
                         parts = entry.split(":", 2)
                         if len(parts) >= 2:
                             virtual_path = sandbox.virtualize_path(parts[0])
-                            entry = ":".join([virtual_path] + parts[1:])
+                            entry = ":".join([virtual_path, *parts[1:]])
                     result += f"{entry}\n"
             elif output_mode == "count":
                 result = f"Match counts for pattern '{pattern}':\n"
@@ -138,7 +149,7 @@ def create_grep_tool(sandbox: Any):
             return result.rstrip()
 
         except Exception as e:
-            error_msg = f"Failed to grep content: {str(e)}"
+            error_msg = f"Failed to grep content: {e!s}"
             logger.error(
                 error_msg,
                 pattern=pattern,

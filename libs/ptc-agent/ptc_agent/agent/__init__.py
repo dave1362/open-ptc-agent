@@ -1,5 +1,4 @@
-"""
-Agent package - AI agent implementations using deepagent.
+"""Agent package - AI agent implementations using deepagent.
 
 This package provides the PTC (Programmatic Tool Calling) agent pattern:
 - Uses deepagent for orchestration and sub-agent delegation
@@ -20,57 +19,57 @@ Configuration:
 - File-based: Use load_from_files() from ptc_agent.config
 """
 
-from .agent import PTCAgent, PTCExecutor, create_ptc_agent
-from .backends import DaytonaBackend
-from .subagents import create_research_subagent
-
 # Re-export from ptc_agent.config for backward compatibility
 from ptc_agent.config import (
     # Config classes (pure data)
     AgentConfig,
     LLMConfig,
     LLMDefinition,
-    # Config loading
-    load_from_files,
-    load_core_from_files,
-    load_from_dict,
-    load_llm_catalog,
-    # Config path utilities
-    get_default_config_dir,
-    get_config_search_paths,
-    find_config_file,
-    find_project_root,
-    ensure_config_dir,
-    # Template generation
-    generate_config_template,
     # Utilities
     configure_logging,
+    ensure_config_dir,
+    find_config_file,
+    find_project_root,
+    # Template generation
+    generate_config_template,
+    get_config_search_paths,
+    # Config path utilities
+    get_default_config_dir,
+    load_core_from_files,
+    load_from_dict,
+    # Config loading
+    load_from_files,
+    load_llm_catalog,
 )
+
+from .agent import PTCAgent, PTCExecutor, create_ptc_agent
+from .backends import DaytonaBackend
+from .subagents import create_research_subagent
 
 __all__ = [
     # Config classes (pure data)
     "AgentConfig",
+    "DaytonaBackend",
     "LLMConfig",
     "LLMDefinition",
-    # Config loaders (optional file-based)
-    "load_from_files",
-    "load_core_from_files",
-    "load_from_dict",
-    "load_llm_catalog",
-    # Config path utilities
-    "get_default_config_dir",
-    "get_config_search_paths",
-    "find_config_file",
-    "find_project_root",
-    "ensure_config_dir",
-    # Template generation
-    "generate_config_template",
-    # Utilities
-    "configure_logging",
     # Agent
     "PTCAgent",
     "PTCExecutor",
+    # Utilities
+    "configure_logging",
     "create_ptc_agent",
-    "DaytonaBackend",
     "create_research_subagent",
+    "ensure_config_dir",
+    "find_config_file",
+    "find_project_root",
+    # Template generation
+    "generate_config_template",
+    "get_config_search_paths",
+    # Config path utilities
+    "get_default_config_dir",
+    "load_core_from_files",
+    "load_from_dict",
+    # Config loaders (optional file-based)
+    "load_from_files",
+    "load_llm_catalog",
 ]

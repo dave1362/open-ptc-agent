@@ -2,13 +2,14 @@
 
 import asyncio
 import os
+from types import TracebackType
 from typing import Any
 
-import structlog
 import httpx
+import structlog
 from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
 from mcp.client.sse import sse_client
+from mcp.client.stdio import stdio_client
 
 from ptc_agent.config.core import CoreConfig, MCPServerConfig
 
@@ -24,7 +25,7 @@ class MCPToolInfo:
         description: str,
         input_schema: dict[str, Any],
         server_name: str,
-    ):
+    ) -> None:
         """Initialize tool info.
 
         Args:
@@ -72,7 +73,7 @@ class MCPToolInfo:
 
         # Look for common type indicators after "Returns:"
         match = re.search(
-            r'Returns?:\s*\n?\s*(\w+(?:\[[\w,\s]+\])?)',
+            r"Returns?:\s*\n?\s*(\w+(?:\[[\w,\s]+\])?)",
             self.description,
             re.IGNORECASE
         )
@@ -80,18 +81,18 @@ class MCPToolInfo:
         if match:
             type_str = match.group(1).lower()
             type_map = {
-                'dict': 'dict',
-                'dictionary': 'dict',
-                'list': 'list',
-                'array': 'list',
-                'str': 'str',
-                'string': 'str',
-                'int': 'int',
-                'integer': 'int',
-                'float': 'float',
-                'number': 'float',
-                'bool': 'bool',
-                'boolean': 'bool',
+                "dict": "dict",
+                "dictionary": "dict",
+                "list": "list",
+                "array": "list",
+                "str": "str",
+                "string": "str",
+                "int": "int",
+                "integer": "int",
+                "float": "float",
+                "number": "float",
+                "bool": "bool",
+                "boolean": "bool",
             }
             return type_map.get(type_str, "Any")
 
@@ -121,7 +122,7 @@ class MCPServerConnector:
     stdio_client and ClientSession contexts alive.
     """
 
-    def __init__(self, config: MCPServerConfig):
+    def __init__(self, config: MCPServerConfig) -> None:
         """Initialize server connector.
 
         Args:
@@ -203,7 +204,7 @@ class MCPServerConnector:
 
         return expanded_url
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "MCPServerConnector":
         """Enter async context manager - start connection task.
 
         Returns:
@@ -243,7 +244,8 @@ class MCPServerConnector:
                 # HTTP transport - use direct JSON-RPC over HTTP POST
                 url = self._expand_url()
                 if not url:
-                    raise ValueError(f"URL required for HTTP transport: {self.config.name}")
+                    msg = f"URL required for HTTP transport: {self.config.name}"
+                    raise ValueError(msg)
 
                 # HTTP transport doesn't use ClientSession - we make direct requests
                 self._http_url = url
@@ -276,34 +278,36 @@ class MCPServerConnector:
                 # SSE transport - use URL-based connection
                 url = self._expand_url()
                 if not url:
-                    raise ValueError(f"URL required for SSE transport: {self.config.name}")
+                    msg = f"URL required for SSE transport: {self.config.name}"
+                    raise ValueError(msg)
 
-                async with sse_client(url) as (read_stream, write_stream):
-                    async with ClientSession(read_stream, write_stream) as session:
-                        self.session = session
+                async with sse_client(url) as (read_stream, write_stream), ClientSession(read_stream, write_stream) as session:
+                    self.session = session
 
-                        # Initialize and discover tools
-                        # SSE connections need retry due to endpoint event timing
-                        await self.session.initialize()
-                        await self._discover_tools_with_retry()
+                    # Initialize and discover tools
+                    # SSE connections need retry due to endpoint event timing
+                    await self.session.initialize()
+                    await self._discover_tools_with_retry()
 
-                        logger.debug(
-                            "MCP SSE connection established",
-                            server=self.config.name,
-                        )
+                    logger.debug(
+                        "MCP SSE connection established",
+                        server=self.config.name,
+                    )
 
-                        # Signal that connection is ready
-                        self._ready.set()
+                    # Signal that connection is ready
+                    self._ready.set()
 
-                        # Keep contexts alive until disconnect is signaled
-                        await self._disconnect_event.wait()
+                    # Keep contexts alive until disconnect is signaled
+                    await self._disconnect_event.wait()
 
-                        logger.debug(
-                            "MCP SSE connection disconnect signaled",
-                            server=self.config.name,
-                        )
+                    logger.debug(
+                        "MCP SSE connection disconnect signaled",
+                        server=self.config.name,
+                    )
             else:
                 # Stdio transport (default) - use command-based connection
+                if not self.config.command:
+                    raise ValueError("Command is required for stdio transport")
                 server_params = StdioServerParameters(
                     command=self.config.command,
                     args=self.config.args,
@@ -406,7 +410,8 @@ class MCPServerConnector:
             result = response.json()
 
             if "error" in result:
-                raise RuntimeError(f"MCP error: {result['error']}")
+                msg = f"MCP error: {result['error']}"
+                raise RuntimeError(msg)
 
             # Parse tools from response
             tools_data = result.get("result", {}).get("tools", [])
@@ -465,11 +470,12 @@ class MCPServerConnector:
         result = response.json()
 
         if "error" in result:
-            raise RuntimeError(f"MCP tool call failed: {result['error']}")
+            msg = f"MCP tool call failed: {result['error']}"
+            raise RuntimeError(msg)
 
         return result.get("result", {})
 
-    async def _discover_tools_with_retry(self, max_retries: int = 3) -> None:
+    async def _discover_tools_with_retry(self, *, max_retries: int = 3) -> None:
         """Discover tools with retry logic for SSE connections.
 
         SSE connections may have timing issues where the endpoint event
@@ -542,25 +548,23 @@ class MCPServerConnector:
                             return first["text"]
                 return result
 
-            else:
-                # SSE/stdio transport uses session
-                if not self.session:
-                    raise RuntimeError("Not connected to server")
+            # SSE/stdio transport uses session
+            if not self.session:
+                raise RuntimeError("Not connected to server")
 
-                result = await self.session.call_tool(tool_name, arguments)
+            result = await self.session.call_tool(tool_name, arguments)
 
-                logger.debug("MCP tool call completed", server=self.config.name, tool=tool_name)
+            logger.debug("MCP tool call completed", server=self.config.name, tool=tool_name)
 
-                # Extract content from result
-                if hasattr(result, "content") and result.content:
-                    # Return first content item's text
-                    if len(result.content) > 0:
-                        content_item = result.content[0]
-                        if hasattr(content_item, "text"):
-                            return content_item.text
-                        return str(content_item)
+            # Extract content from result
+            if hasattr(result, "content") and result.content and len(result.content) > 0:
+                # Return first content item's text
+                content_item = result.content[0]
+                if hasattr(content_item, "text"):
+                    return content_item.text
+                return str(content_item)
 
-                return str(result)
+            return str(result)
 
         except Exception as e:
             logger.error(
@@ -571,7 +575,12 @@ class MCPServerConnector:
             )
             raise
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         """Exit async context manager - signal disconnect and wait for task.
 
         Args:
@@ -588,7 +597,7 @@ class MCPServerConnector:
         if self._connection_task:
             try:
                 await self._connection_task
-            except Exception as e:
+            except (asyncio.CancelledError, Exception) as e:
                 logger.warning(
                     "Error during disconnect task completion",
                     server=self.config.name,
@@ -608,7 +617,7 @@ class MCPServerConnector:
 class MCPRegistry:
     """Registry of all configured MCP servers."""
 
-    def __init__(self, config: CoreConfig):
+    def __init__(self, config: CoreConfig) -> None:
         """Initialize MCP registry.
 
         Args:
@@ -735,15 +744,21 @@ class MCPRegistry:
         """
         connector = self.connectors.get(server_name)
         if not connector:
-            raise ValueError(f"Server not found: {server_name}")
+            msg = f"Server not found: {server_name}"
+            raise ValueError(msg)
 
         return await connector.call_tool(tool_name, arguments)
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "MCPRegistry":
         """Async context manager entry."""
         await self.connect_all()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         """Async context manager exit."""
         await self.disconnect_all()

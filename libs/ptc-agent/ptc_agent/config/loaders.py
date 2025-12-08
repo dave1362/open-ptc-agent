@@ -22,7 +22,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import aiofiles
 
@@ -40,7 +40,6 @@ from ptc_agent.config.utils import (
     validate_required_sections,
 )
 
-
 # =============================================================================
 # Config Path Utilities
 # =============================================================================
@@ -55,7 +54,7 @@ def get_default_config_dir() -> Path:
     return Path.home() / ".ptc-agent"
 
 
-def find_project_root(start_path: Optional[Path] = None) -> Optional[Path]:
+def find_project_root(start_path: Path | None = None) -> Path | None:
     """Find git repository root by walking up from start_path.
 
     Args:
@@ -72,7 +71,7 @@ def find_project_root(start_path: Optional[Path] = None) -> Optional[Path]:
     return None
 
 
-def get_config_search_paths(start_path: Optional[Path] = None) -> List[Path]:
+def get_config_search_paths(start_path: Path | None = None) -> list[Path]:
     """Get ordered list of config search paths.
 
     Search order:
@@ -102,9 +101,9 @@ def get_config_search_paths(start_path: Optional[Path] = None) -> List[Path]:
 
 def find_config_file(
     filename: str,
-    search_paths: Optional[List[Path]] = None,
-    env_var: Optional[str] = None,
-) -> Optional[Path]:
+    search_paths: list[Path] | None = None,
+    env_var: str | None = None,
+) -> Path | None:
     """Find first existing config file in search paths.
 
     Args:
@@ -147,9 +146,10 @@ def ensure_config_dir() -> Path:
 
 
 async def load_from_files(
-    config_file: Optional[Path] = None,
-    llms_file: Optional[Path] = None,
-    env_file: Optional[Path] = None,
+    config_file: Path | None = None,
+    llms_file: Path | None = None,
+    env_file: Path | None = None,
+    *,
     search_paths: bool = True,
 ) -> AgentConfig:
     """Load AgentConfig from config files (config.yaml, llms.json, .env).
@@ -220,8 +220,9 @@ async def load_from_files(
 
 
 async def load_core_from_files(
-    config_file: Optional[Path] = None,
-    env_file: Optional[Path] = None,
+    config_file: Path | None = None,
+    env_file: Path | None = None,
+    *,
     search_paths: bool = True,
 ) -> CoreConfig:
     """Load CoreConfig from config files (config.yaml, .env).
@@ -289,8 +290,8 @@ async def load_core_from_files(
 
 
 def load_from_dict(
-    config_data: Dict[str, Any],
-    llm_catalog: Optional[Dict[str, LLMDefinition]] = None,
+    config_data: dict[str, Any],
+    llm_catalog: dict[str, LLMDefinition] | None = None,
 ) -> AgentConfig:
     """Create AgentConfig from a dictionary (e.g., parsed YAML).
 
@@ -407,7 +408,7 @@ def load_from_dict(
     return config
 
 
-async def _load_llm_catalog(llms_file: Path) -> Dict[str, LLMDefinition]:
+async def _load_llm_catalog(llms_file: Path) -> dict[str, LLMDefinition]:
     """Load LLM catalog from llms.json file.
 
     Args:
@@ -427,11 +428,12 @@ async def _load_llm_catalog(llms_file: Path) -> Dict[str, LLMDefinition]:
         )
 
     try:
-        async with aiofiles.open(llms_file, "r") as f:
+        async with aiofiles.open(llms_file) as f:
             llms_content = await f.read()
         llms_data = json.loads(llms_content)
     except json.JSONDecodeError as e:
-        raise ValueError(f"Failed to parse llms.json: {e}")
+        msg = f"Failed to parse llms.json: {e}"
+        raise ValueError(msg) from e
 
     if "llms" not in llms_data:
         raise ValueError(
@@ -444,7 +446,7 @@ async def _load_llm_catalog(llms_file: Path) -> Dict[str, LLMDefinition]:
     }
 
 
-async def load_llm_catalog(llms_file: Optional[Path] = None) -> Dict[str, LLMDefinition]:
+async def load_llm_catalog(llms_file: Path | None = None) -> dict[str, LLMDefinition]:
     """Load LLM catalog from llms.json file (public API).
 
     Args:
@@ -565,8 +567,8 @@ LLMS_TEMPLATE = """{
       "sdk": "langchain_anthropic.ChatAnthropic",
       "api_key_env": "ANTHROPIC_API_KEY"
     },
-    "gpt-4o": {
-      "model_id": "gpt-4o",
+    "gpt-5.1": {
+      "model_id": "gpt-5.1",
       "provider": "openai",
       "sdk": "langchain_openai.ChatOpenAI",
       "api_key_env": "OPENAI_API_KEY"
@@ -578,9 +580,10 @@ LLMS_TEMPLATE = """{
 
 def generate_config_template(
     output_dir: Path,
+    *,
     include_llms: bool = True,
     overwrite: bool = False,
-) -> Dict[str, Path]:
+) -> dict[str, Path]:
     """Generate config.yaml and optionally llms.json templates.
 
     This is useful for CLI 'config init' commands or first-run setup.
@@ -602,7 +605,8 @@ def generate_config_template(
     # Write config.yaml
     config_path = output_dir / "config.yaml"
     if config_path.exists() and not overwrite:
-        raise FileExistsError(f"Config file already exists: {config_path}")
+        msg = f"Config file already exists: {config_path}"
+        raise FileExistsError(msg)
     config_path.write_text(CONFIG_TEMPLATE)
     created["config.yaml"] = config_path
 
@@ -610,7 +614,8 @@ def generate_config_template(
     if include_llms:
         llms_path = output_dir / "llms.json"
         if llms_path.exists() and not overwrite:
-            raise FileExistsError(f"LLMs file already exists: {llms_path}")
+            msg = f"LLMs file already exists: {llms_path}"
+            raise FileExistsError(msg)
         llms_path.write_text(LLMS_TEMPLATE)
         created["llms.json"] = llms_path
 

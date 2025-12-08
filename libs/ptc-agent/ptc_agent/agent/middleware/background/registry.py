@@ -85,7 +85,7 @@ class BackgroundTaskRegistry:
     new tasks, poll for completion, and collect results.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the registry."""
         self._tasks: dict[str, BackgroundTask] = {}
         self._task_by_number: dict[int, str] = {}  # task_number -> task_id mapping
@@ -239,15 +239,12 @@ class BackgroundTaskRegistry:
             timeout=timeout,
         )
 
-        try:
-            done, pending = await asyncio.wait(
-                [task.asyncio_task],
-                timeout=timeout,
-                return_when=asyncio.ALL_COMPLETED,
-            )
-        except Exception as e:
-            logger.error("Error waiting for task", task_number=task_number, error=str(e))
-            return {"success": False, "error": str(e)}
+        # asyncio.wait() returns (done, pending) when timeout expires, never raises TimeoutError
+        _done, _pending = await asyncio.wait(
+            [task.asyncio_task],
+            timeout=timeout,
+            return_when=asyncio.ALL_COMPLETED,
+        )
 
         async with self._lock:
             if task.asyncio_task.done():
@@ -301,16 +298,12 @@ class BackgroundTaskRegistry:
         )
 
         # Wait for all tasks with timeout
-        try:
-            done, pending = await asyncio.wait(
-                tasks_to_wait.values(),
-                timeout=timeout,
-                return_when=asyncio.ALL_COMPLETED,
-            )
-        except Exception as e:
-            logger.error("Error waiting for tasks", error=str(e))
-            done = set()
-            pending = set(tasks_to_wait.values())
+        # asyncio.wait() returns (done, pending) when timeout expires, never raises TimeoutError
+        _done, _pending = await asyncio.wait(
+            tasks_to_wait.values(),
+            timeout=timeout,
+            return_when=asyncio.ALL_COMPLETED,
+        )
 
         # Collect results
         results = {}

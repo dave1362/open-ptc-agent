@@ -1,15 +1,17 @@
 """Shared utilities for agent tools."""
 
 import functools
+from collections.abc import Awaitable, Callable
+from typing import Any, TypeVar
+
 import structlog
-from typing import Callable, TypeVar
 
 logger = structlog.get_logger(__name__)
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
-def tool_error_handler(operation_name: str):
+def tool_error_handler(operation_name: str) -> Callable[[Callable[..., Awaitable[Any]]], Callable[..., Awaitable[str]]]:
     """Decorator for consistent tool error handling.
 
     Args:
@@ -20,9 +22,9 @@ def tool_error_handler(operation_name: str):
         async def my_tool(...):
             ...
     """
-    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+    def decorator(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[str]]:
         @functools.wraps(func)
-        async def wrapper(*args, **kwargs) -> str:
+        async def wrapper(*args: Any, **kwargs: Any) -> str:
             try:
                 return await func(*args, **kwargs)
             except Exception as e:
@@ -31,6 +33,6 @@ def tool_error_handler(operation_name: str):
                     error=str(e),
                     exc_info=True
                 )
-                return f"ERROR: {operation_name} failed - {str(e)}"
+                return f"ERROR: {operation_name} failed - {e!s}"
         return wrapper
     return decorator
