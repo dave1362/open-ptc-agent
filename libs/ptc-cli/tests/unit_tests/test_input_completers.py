@@ -144,7 +144,7 @@ class TestCommandCompleter:
         completions = list(completer.get_completions(doc, event))
         assert len(completions) > 0
         # All completions should be valid commands
-        assert all(c.text in ["clear", "help", "tokens", "files", "view", "copy", "download", "exit", "q"]
+        assert all(c.text in ["clear", "help", "tokens", "files", "view", "copy", "download", "model", "exit"]
                    for c in completions)
 
     def test_partial_command_completion(self):

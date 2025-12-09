@@ -42,12 +42,18 @@ class ModelSwitchContext:
         # Create new checkpointer
         new_checkpointer = InMemorySaver()
 
+        # Get the new LLM from updated config
+        new_llm = self.agent_config.get_llm_client()
+
         # Recreate the agent with new LLM
+        assert self.session.sandbox is not None, "Session sandbox must be initialized"  # noqa: S101
+        assert self.session.mcp_registry is not None, "Session MCP registry must be initialized"  # noqa: S101
         new_agent = self.ptc_agent.create_agent(
             sandbox=self.session.sandbox,
             mcp_registry=self.session.mcp_registry,
             subagent_names=self.agent_config.subagents_enabled,
             checkpointer=new_checkpointer,
+            llm=new_llm,
         )
 
         # Store checkpointer reference
@@ -306,10 +312,11 @@ async def simple_cli(
     sandbox_completer = SandboxFileCompleter()
     if session and session.sandbox:
         sandbox = await session.get_sandbox()
-        files = sandbox.glob_files("**/*", path=".")
-        home_prefix = "/home/daytona/"
-        normalized = [f.removeprefix(home_prefix) for f in files]
-        sandbox_completer.set_files(normalized)
+        if sandbox is not None:
+            files = sandbox.glob_files("**/*", path=".")
+            home_prefix = "/home/daytona/"
+            normalized = [f.removeprefix(home_prefix) for f in files]
+            sandbox_completer.set_files(normalized)
 
     # Create prompt session and token tracker
     prompt_session = create_prompt_session(assistant_id, session_state, sandbox_completer)
@@ -355,7 +362,7 @@ async def simple_cli(
                 current_agent,
                 token_tracker,
                 session_state,
-                session=session,
+                session=session,  # type: ignore[arg-type]
                 model_switch_context=model_switch_context,
             )
             if result == "exit":

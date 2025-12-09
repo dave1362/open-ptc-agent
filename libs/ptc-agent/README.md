@@ -108,6 +108,21 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
+### Model Switching
+
+To switch models without recreating `PTCAgent`, pass an `llm` override to `create_agent()`:
+
+```python
+from langchain_openai import ChatOpenAI
+
+# Switch to a different model for this agent instance
+new_llm = ChatOpenAI(model="gpt-4o")
+agent = ptc_agent.create_agent(
+    sandbox=session.sandbox,
+    mcp_registry=session.mcp_registry,
+    llm=new_llm,  # Overrides the LLM from config
+)
+```
 
 ## Configuration Methods
 
@@ -125,10 +140,22 @@ config = await load_from_files()
 config.validate_api_keys()
 ```
 
-**Config File Search Paths** (in order):
-1. Current working directory
-2. Project root (git repository root)
-3. `~/.ptc-agent/`
+**Config File Search Paths** depend on the `ConfigContext`:
+
+| Context | Search Order | Use Case |
+|---------|--------------|----------|
+| `SDK` (default) | CWD → git root → `~/.ptc-agent/` | Programmatic usage, scripts |
+| `CLI` | `~/.ptc-agent/` → CWD | CLI applications, user-facing tools |
+
+```python
+from ptc_agent.config import ConfigContext, load_from_files
+
+# SDK context (default) - searches CWD first
+config = await load_from_files()
+
+# CLI context - searches ~/.ptc-agent/ first (user config takes priority)
+config = await load_from_files(context=ConfigContext.CLI)
+```
 
 **Environment Variable Overrides:**
 - `PTC_CONFIG_FILE` - Path to config.yaml
@@ -172,6 +199,8 @@ config = AgentConfig.create(
 )
 ```
 
+**Path Resolution**: Relative paths in `args` (e.g., `mcp_servers/my_server.py`) are resolved relative to the config file location first, then fall back to CWD. Absolute paths are also supported.
+
 **With Custom Parameters:**
 
 ```python
@@ -210,7 +239,3 @@ config = AgentConfig.create(
 | `ANTHROPIC_API_KEY` | Depends | Required if using Anthropic models |
 | `OPENAI_API_KEY` | Depends | Required if using OpenAI models |
 | MCP server keys | Optional | e.g., `TAVILY_API_KEY` for web search |
-
-## Documentation
-
-See the main [open-ptc-agent](https://github.com/Chen-zexi/open-ptc-agent) repository for full documentation.

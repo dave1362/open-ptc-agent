@@ -66,6 +66,9 @@ async def recover_sandbox(session: "Session", console: "Console") -> bool:
         return False
 
     sandbox_id = getattr(session.sandbox, "sandbox_id", None)
+    if sandbox_id is None:
+        console.print("[red]No sandbox ID to reconnect to[/red]")
+        return False
 
     with Progress(
         SpinnerColumn(spinner_name="dots"),

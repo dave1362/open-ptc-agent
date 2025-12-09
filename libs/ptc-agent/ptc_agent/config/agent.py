@@ -7,6 +7,7 @@ Use src.config.loaders for file-based loading.
 """
 
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -81,6 +82,7 @@ class AgentConfig(BaseModel):
     # Runtime data (not from config files)
     llm_definition: LLMDefinition | None = Field(default=None, exclude=True)
     llm_client: Any | None = Field(default=None, exclude=True)  # BaseChatModel instance
+    config_file_dir: Path | None = Field(default=None, exclude=True)  # For path resolution
 
     @classmethod
     def create(
@@ -321,9 +323,12 @@ class AgentConfig(BaseModel):
             # Generic fallback (most use 'api_key')
             kwargs["api_key"] = api_key
 
-        # Add base_url if specified
+        # Add base_url if specified (DeepSeek uses 'api_base' parameter name)
         if self.llm_definition.base_url:
-            kwargs["base_url"] = self.llm_definition.base_url
+            if "deepseek" in self.llm_definition.sdk.lower():
+                kwargs["api_base"] = self.llm_definition.base_url
+            else:
+                kwargs["base_url"] = self.llm_definition.base_url
 
         # Add output_version if specified
         if self.llm_definition.output_version:
@@ -342,10 +347,12 @@ class AgentConfig(BaseModel):
         Returns:
             CoreConfig instance with sandbox/MCP settings
         """
-        return CoreConfig(
+        core_config = CoreConfig(
             daytona=self.daytona,
             security=self.security,
             mcp=self.mcp,
             logging=self.logging,
             filesystem=self.filesystem,
         )
+        core_config.config_file_dir = self.config_file_dir
+        return core_config

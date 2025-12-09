@@ -143,7 +143,7 @@ def get_session_config_hash(config: "AgentConfig") -> str:
         "python_version": core_config.daytona.python_version,
         "snapshot_enabled": core_config.daytona.snapshot_enabled,
         "snapshot_name": core_config.daytona.snapshot_name,
-        "mcp_servers": sorted(mcp_servers_data, key=lambda x: x["name"]),
+        "mcp_servers": sorted(mcp_servers_data, key=lambda x: str(x["name"])),
     }
 
     config_str = json.dumps(config_data, sort_keys=True)

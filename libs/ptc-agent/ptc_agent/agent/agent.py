@@ -183,6 +183,7 @@ class PTCAgent:
         background_timeout: float = 300.0,
         checkpointer: Any | None = None,
         system_prompt_suffix: str | None = None,
+        llm: Any | None = None,
     ) -> Any:
         """Create a deepagent with PTC pattern capabilities.
 
@@ -197,10 +198,14 @@ class PTCAgent:
                 Required for submit_plan interrupt/resume workflow.
             system_prompt_suffix: Optional string to append to the system prompt.
                 Useful for adding user/project-specific instructions (e.g., agent.md content).
+            llm: Optional LLM override. If provided, uses this instead of self.llm.
+                Useful for model switching without recreating PTCAgent instance.
 
         Returns:
             Configured BackgroundSubagentOrchestrator wrapping the deepagent
         """
+        # Use provided LLM or fall back to instance LLM
+        model = llm if llm is not None else self.llm
         # Create the execute_code tool for MCP invocation
         execute_code_tool = create_execute_code_tool(sandbox, mcp_registry)
 
@@ -349,7 +354,7 @@ class PTCAgent:
 
         # Build middleware inherited from deepagent
         deepagent_middleware = create_deepagent_middleware(
-            model=self.llm,
+            model=model,
             tools=tools,
             subagents=subagents,
             backend=backend,
@@ -358,7 +363,7 @@ class PTCAgent:
 
         # Create agent with middleware stack
         agent: Any = create_agent(
-            self.llm,
+            model,
             system_prompt=system_prompt,
             tools=tools,
             middleware=deepagent_middleware,

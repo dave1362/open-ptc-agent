@@ -36,13 +36,13 @@ async def create_agent_with_session(
 
     # Import PTC Agent modules
     from ptc_agent.agent.agent import PTCAgent
-    from ptc_agent.config import load_from_files
+    from ptc_agent.config import ConfigContext, load_from_files
     from ptc_agent.core.session import SessionManager
 
     report("Loading configuration...")
 
-    # Load existing PTC config
-    config = await load_from_files()
+    # Load config with CLI context (searches ~/.ptc-agent/ first, auto-generates if missing)
+    config = await load_from_files(context=ConfigContext.CLI, auto_generate=True)
     config.validate_api_keys()
 
     # Calculate config hash for invalidation detection
@@ -114,6 +114,8 @@ async def create_agent_with_session(
 
     # Create agent using existing PTCAgent
     ptc_agent = PTCAgent(config)
+    assert session.sandbox is not None, "Session sandbox must be initialized"  # noqa: S101
+    assert session.mcp_registry is not None, "Session MCP registry must be initialized"  # noqa: S101
     agent = ptc_agent.create_agent(
         sandbox=session.sandbox,
         mcp_registry=session.mcp_registry,

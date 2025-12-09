@@ -42,6 +42,8 @@ from ptc_agent.config.core import (
 
 # File-based loading
 from ptc_agent.config.loaders import (
+    # Context enum
+    ConfigContext,
     ensure_config_dir,
     find_config_file,
     find_project_root,
@@ -63,6 +65,8 @@ from ptc_agent.config.utils import configure_logging
 __all__ = [
     # Agent data classes
     "AgentConfig",
+    # Context enum
+    "ConfigContext",
     # Core data classes
     "CoreConfig",
     "DaytonaConfig",

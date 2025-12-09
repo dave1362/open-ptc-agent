@@ -21,6 +21,7 @@ Config Search Paths:
 import asyncio
 import json
 import os
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,13 @@ from ptc_agent.config.utils import (
     load_yaml_file,
     validate_required_sections,
 )
+
+
+class ConfigContext(str, Enum):
+    """Context for configuration loading behavior."""
+
+    SDK = "sdk"  # CWD → git root → ~/.ptc-agent/
+    CLI = "cli"  # ~/.ptc-agent/ → CWD (home first)
 
 # =============================================================================
 # Config Path Utilities
@@ -71,31 +79,35 @@ def find_project_root(start_path: Path | None = None) -> Path | None:
     return None
 
 
-def get_config_search_paths(start_path: Path | None = None) -> list[Path]:
+def get_config_search_paths(
+    start_path: Path | None = None,
+    context: ConfigContext = ConfigContext.SDK,
+) -> list[Path]:
     """Get ordered list of config search paths.
 
-    Search order:
-    1. Current working directory (or start_path)
-    2. Project root (git repo root) if different from cwd
-    3. ~/.ptc-agent/
+    Search order depends on context:
+    - SDK: CWD → git root → ~/.ptc-agent/
+    - CLI: ~/.ptc-agent/ → CWD (home first)
 
     Args:
         start_path: Starting directory (default: current working directory)
+        context: Loading context (SDK or CLI)
 
     Returns:
         List of paths to search for config files
     """
     cwd = start_path or Path.cwd()
-    paths = [cwd]
+    home = get_default_config_dir()
 
-    # Add project root if in a git repo and different from cwd
+    if context == ConfigContext.CLI:
+        return [home, cwd]
+
+    # SDK: existing behavior
+    paths = [cwd]
     project_root = find_project_root(cwd)
     if project_root and project_root != cwd:
         paths.append(project_root)
-
-    # Add home config dir
-    paths.append(get_default_config_dir())
-
+    paths.append(home)
     return paths
 
 
@@ -103,6 +115,7 @@ def find_config_file(
     filename: str,
     search_paths: list[Path] | None = None,
     env_var: str | None = None,
+    context: ConfigContext = ConfigContext.SDK,
 ) -> Path | None:
     """Find first existing config file in search paths.
 
@@ -110,6 +123,7 @@ def find_config_file(
         filename: Name of the file to find (e.g., "config.yaml")
         search_paths: Paths to search (default: get_config_search_paths())
         env_var: Environment variable to check for override
+        context: Loading context (SDK or CLI)
 
     Returns:
         Path to the first existing file, or None if not found
@@ -124,7 +138,7 @@ def find_config_file(
 
     # Search paths in order
     if search_paths is None:
-        search_paths = get_config_search_paths()
+        search_paths = get_config_search_paths(context=context)
 
     for search_path in search_paths:
         candidate = search_path / filename
@@ -151,14 +165,14 @@ async def load_from_files(
     env_file: Path | None = None,
     *,
     search_paths: bool = True,
+    context: ConfigContext = ConfigContext.SDK,
+    auto_generate: bool = False,
 ) -> AgentConfig:
     """Load AgentConfig from config files (config.yaml, llms.json, .env).
 
-    When search_paths is True and no explicit path is provided, files are
-    searched in this order:
-    1. Current working directory
-    2. Project root (git repository root)
-    3. ~/.ptc-agent/
+    Search order depends on context:
+    - SDK: CWD → git root → ~/.ptc-agent/
+    - CLI: ~/.ptc-agent/ → CWD (home first)
 
     Environment variable overrides:
     - PTC_CONFIG_FILE: explicit path to config.yaml
@@ -169,6 +183,8 @@ async def load_from_files(
         llms_file: Optional path to llms.json file (can be None to skip)
         env_file: Optional path to .env file
         search_paths: If True, search multiple paths for config files
+        context: Loading context (SDK or CLI)
+        auto_generate: If True, generate config at ~/.ptc-agent/ when not found
 
     Returns:
         Configured AgentConfig instance
@@ -178,16 +194,28 @@ async def load_from_files(
         ValueError: If required configuration is missing or invalid
         KeyError: If required fields are missing from config files
     """
+    cwd = await asyncio.to_thread(Path.cwd)
+
     # Find config.yaml
     if config_file is None:
         if search_paths:
-            config_file = find_config_file("config.yaml", env_var="PTC_CONFIG_FILE")
+            config_file = await asyncio.to_thread(
+                find_config_file, "config.yaml", None, "PTC_CONFIG_FILE", context
+            )
         else:
-            cwd = await asyncio.to_thread(Path.cwd)
             config_file = cwd / "config.yaml"
 
+    # Auto-generate if missing and requested
+    if (config_file is None or not config_file.exists()) and auto_generate:
+        generated = generate_config_template(get_default_config_dir(), include_llms=False)
+        config_file = generated["config.yaml"]
+
     if config_file is None or not config_file.exists():
-        searched = get_config_search_paths() if search_paths else [Path.cwd()]
+        searched = (
+            await asyncio.to_thread(get_config_search_paths, None, context)
+            if search_paths
+            else [cwd]
+        )
         raise FileNotFoundError(
             f"config.yaml not found in search paths:\n"
             f"  {chr(10).join(str(p) for p in searched)}\n"
@@ -198,9 +226,10 @@ async def load_from_files(
     llm_catalog = None
     if llms_file is None:
         if search_paths:
-            llms_file = find_config_file("llms.json", env_var="PTC_LLMS_FILE")
+            llms_file = await asyncio.to_thread(
+                find_config_file, "llms.json", None, "PTC_LLMS_FILE", context
+            )
         else:
-            cwd = await asyncio.to_thread(Path.cwd)
             candidate = cwd / "llms.json"
             if candidate.exists():
                 llms_file = candidate
@@ -216,7 +245,12 @@ async def load_from_files(
     config_data = await load_yaml_file(config_file)
 
     # Create config from dict
-    return load_from_dict(config_data, llm_catalog)
+    config = load_from_dict(config_data, llm_catalog)
+
+    # Store config file directory for path resolution
+    config.config_file_dir = config_file.parent if config_file else None
+
+    return config
 
 
 async def load_core_from_files(
@@ -224,19 +258,19 @@ async def load_core_from_files(
     env_file: Path | None = None,
     *,
     search_paths: bool = True,
+    context: ConfigContext = ConfigContext.SDK,
 ) -> CoreConfig:
     """Load CoreConfig from config files (config.yaml, .env).
 
-    When search_paths is True and no explicit path is provided, files are
-    searched in this order:
-    1. Current working directory
-    2. Project root (git repository root)
-    3. ~/.ptc-agent/
+    Search order depends on context:
+    - SDK: CWD → git root → ~/.ptc-agent/
+    - CLI: ~/.ptc-agent/ → CWD (home first)
 
     Args:
         config_file: Optional path to config.yaml file
         env_file: Optional path to .env file
         search_paths: If True, search multiple paths for config files
+        context: Loading context (SDK or CLI)
 
     Returns:
         Configured CoreConfig instance
@@ -246,16 +280,23 @@ async def load_core_from_files(
         ValueError: If required configuration is missing or invalid
         KeyError: If required fields are missing from config files
     """
+    cwd = await asyncio.to_thread(Path.cwd)
+
     # Find config.yaml
     if config_file is None:
         if search_paths:
-            config_file = find_config_file("config.yaml", env_var="PTC_CONFIG_FILE")
+            config_file = await asyncio.to_thread(
+                find_config_file, "config.yaml", None, "PTC_CONFIG_FILE", context
+            )
         else:
-            cwd = await asyncio.to_thread(Path.cwd)
             config_file = cwd / "config.yaml"
 
     if config_file is None or not config_file.exists():
-        searched = get_config_search_paths() if search_paths else [Path.cwd()]
+        searched = (
+            await asyncio.to_thread(get_config_search_paths, None, context)
+            if search_paths
+            else [cwd]
+        )
         raise FileNotFoundError(
             f"config.yaml not found in search paths:\n"
             f"  {chr(10).join(str(p) for p in searched)}\n"
@@ -280,13 +321,18 @@ async def load_core_from_files(
     filesystem_config = create_filesystem_config(config_data["filesystem"])
 
     # Create config object
-    return CoreConfig(
+    core_config = CoreConfig(
         daytona=daytona_config,
         security=security_config,
         mcp=mcp_config,
         logging=logging_config,
         filesystem=filesystem_config,
     )
+
+    # Store config file directory for path resolution
+    core_config.config_file_dir = config_file.parent if config_file else None
+
+    return core_config
 
 
 def load_from_dict(
@@ -456,7 +502,9 @@ async def load_llm_catalog(llms_file: Path | None = None) -> dict[str, LLMDefini
         Dictionary mapping LLM names to LLMDefinition objects
     """
     if llms_file is None:
-        llms_file = find_config_file("llms.json", env_var="PTC_LLMS_FILE")
+        llms_file = await asyncio.to_thread(
+            find_config_file, "llms.json", None, "PTC_LLMS_FILE"
+        )
         if llms_file is None:
             cwd = await asyncio.to_thread(Path.cwd)
             llms_file = cwd / "llms.json"
@@ -471,11 +519,12 @@ async def load_llm_catalog(llms_file: Path | None = None) -> dict[str, LLMDefini
 
 CONFIG_TEMPLATE = """# PTC Agent Configuration
 # Place this file in ~/.ptc-agent/config.yaml or your project root
-#
-# Config search order:
-# 1. Current working directory
-# 2. Project root (git repository root)
-# 3. ~/.ptc-agent/
+
+# CLI Configuration (for ptc-cli)
+# --------------------------------
+cli:
+  theme: "auto"  # auto, dark, light
+  # palette: "nord"  # emerald, cyan, amber, teal, nord, gruvbox, catppuccin, tokyo_night
 
 # LLM Configuration
 # -----------------

@@ -511,7 +511,10 @@ async def execute_task(  # noqa: PLR0911
                                 any_rejected = True
                                 # Put feedback in decision message for HITL to use in ToolMessage
                                 feedback_text = feedback or "No feedback provided"
-                                decision["message"] = f"<system-reminder>Your plan was rejected. User feedback: {feedback_text}. You MUST submit the revised plan for review using submit_plan before proceeding.</system-reminder>"
+                                decision["message"] = (
+                                f"<system-reminder>Your plan was rejected. User feedback: {feedback_text}. "
+                                "You MUST submit the revised plan for review using submit_plan before proceeding.</system-reminder>"
+                            )
 
                             decisions.append(decision)
 

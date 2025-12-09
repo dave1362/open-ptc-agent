@@ -7,17 +7,64 @@ Run with: pytest tests/integration_tests/test_mcp_tool_transformation.py -v -m i
 Skip with: pytest -m "not integration"
 """
 
+import json
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
+import yaml
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from ptc_agent.config import load_core_from_files
+from ptc_agent.config import ConfigContext, load_core_from_files
 from ptc_agent.core.session import SessionManager
+
+
+# =============================================================================
+# Mock MCP Server Script
+# =============================================================================
+
+MOCK_MCP_SERVER_SCRIPT = '''#!/usr/bin/env python3
+"""Mock MCP server for testing."""
+from mcp.server.fastmcp import FastMCP
+
+mcp = FastMCP("TestMCP")
+
+
+@mcp.tool()
+def test_tool(message: str) -> str:
+    """A simple test tool.
+
+    Args:
+        message: The message to echo
+
+    Returns:
+        The echoed message
+    """
+    return f"Echo: {message}"
+
+
+@mcp.tool()
+def add_numbers(a: int, b: int) -> int:
+    """Add two numbers.
+
+    Args:
+        a: First number
+        b: Second number
+
+    Returns:
+        Sum of a and b
+    """
+    return a + b
+
+
+if __name__ == "__main__":
+    mcp.run(transport="stdio")
+'''
+
 
 # =============================================================================
 # Test Fixtures
@@ -25,15 +72,90 @@ from ptc_agent.core.session import SessionManager
 
 
 @pytest.fixture(scope="module")
-async def sandbox_session():
+def fake_home(tmp_path_factory):
+    """Create a fake home directory with config files and mock MCP server."""
+    fake_home = tmp_path_factory.mktemp("home")
+
+    # Create .ptc-agent directory
+    ptc_dir = fake_home / ".ptc-agent"
+    ptc_dir.mkdir()
+
+    # Create mcp_servers directory and mock server
+    mcp_servers_dir = ptc_dir / "mcp_servers"
+    mcp_servers_dir.mkdir()
+    (mcp_servers_dir / "test_mcp_server.py").write_text(MOCK_MCP_SERVER_SCRIPT)
+
+    # Create llms.json
+    llms_data = {
+        "llms": {
+            "test-llm": {
+                "model_id": "test-model",
+                "provider": "anthropic",
+                "sdk": "langchain_anthropic.ChatAnthropic",
+                "api_key_env": "ANTHROPIC_API_KEY",
+            }
+        }
+    }
+    (ptc_dir / "llms.json").write_text(json.dumps(llms_data))
+
+    # Create config.yaml with mock MCP server (use absolute path)
+    mcp_server_path = str(mcp_servers_dir / "test_mcp_server.py")
+    config_data = {
+        "llm": {"name": "test-llm"},
+        "daytona": {
+            "base_url": "https://app.daytona.io/api",
+            "auto_stop_interval": 3600,
+            "auto_archive_interval": 86400,
+            "auto_delete_interval": 604800,
+            "python_version": "3.12",
+        },
+        "security": {
+            "max_execution_time": 300,
+            "max_code_length": 10000,
+            "max_file_size": 10485760,
+            "enable_code_validation": False,
+            "allowed_imports": [],
+            "blocked_patterns": [],
+        },
+        "mcp": {
+            "servers": [
+                {
+                    "name": "testserver",  # No hyphens - must be valid Python identifier
+                    "description": "Test MCP server for unit tests",
+                    "transport": "stdio",
+                    "command": "python",
+                    "args": [mcp_server_path],  # Absolute path to mock server
+                }
+            ],
+            "tool_discovery_enabled": True,
+            "lazy_load": True,
+            "cache_duration": 300,
+        },
+        "logging": {"level": "WARNING", "file": "logs/test.log"},
+        "filesystem": {
+            "working_directory": "/home/daytona",
+            "allowed_directories": ["/home/daytona", "/tmp"],
+            "enable_path_validation": True,
+        },
+    }
+    (ptc_dir / "config.yaml").write_text(yaml.dump(config_data))
+
+    return fake_home
+
+
+@pytest.fixture(scope="module")
+async def sandbox_session(fake_home):
     """Set up and tear down a sandbox session for the test module."""
-    config = await load_core_from_files()
-    session = SessionManager.get_session("test-mcp-transformation", config)
-    await session.initialize()
+    # Patch Path.home() to return our fake home
+    # Use ConfigContext.CLI to prioritize ~/.ptc-agent/ config (our fake home)
+    with patch.object(Path, "home", return_value=fake_home):
+        config = await load_core_from_files(context=ConfigContext.CLI)
+        session = SessionManager.get_session("test-mcp-transformation", config)
+        await session.initialize()
 
-    yield session
+        yield session
 
-    await SessionManager.cleanup_session("test-mcp-transformation")
+        await SessionManager.cleanup_session("test-mcp-transformation")
 
 
 @pytest.fixture(scope="module")

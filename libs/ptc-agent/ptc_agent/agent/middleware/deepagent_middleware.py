@@ -67,8 +67,8 @@ def create_deepagent_middleware(
                 FilesystemMiddleware(backend=backend),
                 SummarizationMiddleware(
                     model=model,
-                    max_tokens_before_summary=max_tokens_before_summary,
-                    messages_to_keep=messages_to_keep,
+                    trigger=("tokens", max_tokens_before_summary),
+                    keep=("messages", messages_to_keep),
                 ),
                 AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore"),
                 PatchToolCallsMiddleware(),
@@ -77,8 +77,8 @@ def create_deepagent_middleware(
         ),
         SummarizationMiddleware(
             model=model,
-            max_tokens_before_summary=max_tokens_before_summary,
-            messages_to_keep=messages_to_keep,
+            trigger=("tokens", max_tokens_before_summary),
+            keep=("messages", messages_to_keep),
         ),
         AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore"),
         PatchToolCallsMiddleware(),

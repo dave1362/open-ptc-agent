@@ -29,14 +29,14 @@ if TYPE_CHECKING:
         def normalize_path(self, path: str) -> str: ...
         def read_file(self, path: str) -> str | None: ...
         def download_file_bytes(self, path: str) -> bytes | None: ...
-        async def execute_bash_command(self, command: str, working_dir: str = ..., timeout: int = ...) -> dict: ...  # noqa: ASYNC109
+        async def execute_bash_command(self, command: str, working_dir: str = ..., timeout: int = ..., *, background: bool = ...) -> dict[str, Any]: ...  # noqa: ASYNC109
 
     class _SessionManager(Protocol):
         """Protocol for SessionManager type hint."""
 
         sandbox: _Sandbox | None
 
-        async def get_sandbox(self) -> _Sandbox: ...
+        async def get_sandbox(self) -> _Sandbox | None: ...
 
     class _ModelSwitchContext(Protocol):
         """Protocol for model switch context."""
@@ -110,7 +110,7 @@ async def _handle_files_command(session: _SessionManager | None, *, show_all: bo
         return
 
     sandbox = await session.get_sandbox()
-    files = sandbox.glob_files("**/*", path=".")
+    files = sandbox.glob_files("**/*", path=".")  # type: ignore[union-attr]
 
     # Normalize paths first (remove /home/daytona/ prefix)
     normalized_files = [_normalize_path(f) for f in files]
@@ -156,12 +156,12 @@ async def _handle_view_command(session: _SessionManager | None, path: str) -> No
     sandbox = await session.get_sandbox()
 
     # Normalize path to absolute sandbox path (user enters relative paths from /files output)
-    sandbox_path = sandbox.normalize_path(path)
+    sandbox_path = sandbox.normalize_path(path)  # type: ignore[union-attr]
 
     # Check if image file - auto-download instead of terminal rendering
     image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
     if path.lower().endswith(image_extensions):
-        image_bytes = sandbox.download_file_bytes(sandbox_path)
+        image_bytes = sandbox.download_file_bytes(sandbox_path)  # type: ignore[union-attr]
         if image_bytes:
             local_path = Path.cwd() / Path(path).name
             local_path.write_bytes(image_bytes)
@@ -170,7 +170,7 @@ async def _handle_view_command(session: _SessionManager | None, path: str) -> No
             console.print(f"[red]Failed to download image: {path}[/red]")
     else:
         # Text file - use Rich Syntax highlighting
-        content = sandbox.read_file(sandbox_path)
+        content = sandbox.read_file(sandbox_path)  # type: ignore[union-attr]
         if content is None:
             console.print(f"[red]File not found: {path}[/red]")
         else:
@@ -201,8 +201,8 @@ async def _handle_copy_command(session: _SessionManager | None, path: str) -> No
     sandbox = await session.get_sandbox()
 
     # Normalize path to absolute sandbox path
-    sandbox_path = sandbox.normalize_path(path)
-    content = sandbox.read_file(sandbox_path)
+    sandbox_path = sandbox.normalize_path(path)  # type: ignore[union-attr]
+    content = sandbox.read_file(sandbox_path)  # type: ignore[union-attr]
 
     if content is None:
         console.print(f"[red]File not found: {path}[/red]")
@@ -427,13 +427,6 @@ async def _handle_model_command(  # noqa: PLR0911
         config.llm.name = selected_name
         config.llm_client = None  # Clear cached client
 
-        # Get new LLM client
-        new_llm = config.get_llm_client()
-
-        # Update PTCAgent
-        model_switch_context.ptc_agent.llm = new_llm
-        model_switch_context.ptc_agent.config = config
-
         # Recreate the agent
         await model_switch_context.recreate_agent()
 
@@ -467,7 +460,7 @@ async def _handle_download_command(
     sandbox = await session.get_sandbox()
 
     # Normalize path to absolute sandbox path
-    sandbox_path = sandbox.normalize_path(user_path)
+    sandbox_path = sandbox.normalize_path(user_path)  # type: ignore[union-attr]
 
     # Expand ~ and make absolute for local path
     local_path = Path(local_path_str).expanduser()
@@ -489,14 +482,14 @@ async def _handle_download_command(
     )
     try:
         if user_path.lower().endswith(binary_extensions):
-            binary_content = sandbox.download_file_bytes(sandbox_path)
+            binary_content = sandbox.download_file_bytes(sandbox_path)  # type: ignore[union-attr]
             if binary_content:
                 local_path.write_bytes(binary_content)
                 console.print(f"[green]Downloaded to: {local_path}[/green]")
             else:
                 console.print(f"[red]Failed to download: {user_path}[/red]")
         else:
-            text_content = sandbox.read_file(sandbox_path)
+            text_content = sandbox.read_file(sandbox_path)  # type: ignore[union-attr]
             if text_content:
                 local_path.write_text(text_content)
                 console.print(f"[green]Downloaded to: {local_path}[/green]")
@@ -549,7 +542,7 @@ async def handle_command(
             dirs_to_clear = ["data", "results", "code", "large_tool_results"]
             # Use find -delete to avoid glob expansion issues with set -e
             for dir_name in dirs_to_clear:
-                await sandbox.execute_bash_command(
+                await sandbox.execute_bash_command(  # type: ignore[union-attr]
                     f"find /home/daytona/{dir_name} -mindepth 1 -delete 2>/dev/null || true"
                 )
             console.print("[green]Conversation and sandbox files cleared.[/green]")

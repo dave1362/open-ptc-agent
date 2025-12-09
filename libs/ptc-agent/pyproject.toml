@@ -145,6 +145,7 @@ ignore-var-parameters = true
 strict = true
 ignore_missing_imports = true
 enable_error_code = ["deprecated"]
+disable_error_code = ["import-untyped"]
 disallow_any_generics = false
 warn_return_any = false
 

@@ -530,6 +530,9 @@ class PTCSandbox:
         # Collect files to upload
         files_to_upload = []
 
+        # Get config file directory
+        config_dir = getattr(self.config, "config_file_dir", None)
+
         for server in self.config.mcp.servers:
             if not server.enabled:
                 continue
@@ -538,14 +541,38 @@ class PTCSandbox:
                 if len(server.args) >= 3 and server.args[0] == "run" and server.args[1] == "python":
                     local_path = server.args[2]  # e.g., "mcp_servers/yfinance_mcp_server.py"
 
-                    if Path(local_path).exists():
-                        filename = Path(local_path).name
+                    # Resolve relative paths against config file directory first
+                    path_obj = Path(local_path)
+                    resolved_path = None
+
+                    if not path_obj.is_absolute() and config_dir:
+                        # Try resolving against config file directory
+                        config_relative_path = (config_dir / local_path).resolve()
+                        if config_relative_path.exists():
+                            resolved_path = str(config_relative_path)
+                            logger.debug(
+                                "Resolved MCP server path relative to config",
+                                server=server.name,
+                                original=local_path,
+                                resolved=resolved_path,
+                            )
+
+                    # Fall back to CWD-relative path
+                    if resolved_path is None and path_obj.exists():
+                        resolved_path = local_path
+
+                    if resolved_path:
+                        filename = Path(resolved_path).name
                         sandbox_path = f"{mcp_servers_dir}/{filename}"
-                        files_to_upload.append((server.name, local_path, sandbox_path))
+                        files_to_upload.append((server.name, resolved_path, sandbox_path))
                     else:
+                        searched_paths = [local_path]
+                        if config_dir:
+                            searched_paths.append(str(config_dir / local_path))
                         logger.warning(
                             f"MCP server file not found: {local_path}",
-                            server=server.name
+                            server=server.name,
+                            searched_paths=searched_paths,
                         )
 
         # If we have files to upload, create directory and upload in parallel

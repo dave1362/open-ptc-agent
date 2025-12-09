@@ -10,6 +10,7 @@ This module defines pure data classes for core configuration:
 Use src.config.loaders for file-based loading.
 """
 
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -119,6 +120,7 @@ class CoreConfig(BaseModel):
     mcp: MCPConfig
     logging: LoggingConfig
     filesystem: FilesystemConfig
+    config_file_dir: Path | None = Field(default=None, exclude=True)
 
     def validate_api_keys(self) -> None:
         """Validate that required API keys are present.
