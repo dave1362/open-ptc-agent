@@ -2,6 +2,8 @@
 
 Interactive command-line interface for PTC Agent.
 
+![PTC CLI](../../docs/assets/ptc_agent.png)
+
 ## Features
 
 - Interactive AI agent sessions with sandboxed code execution
@@ -23,6 +25,7 @@ From the repository root:
 
 ```bash
 uv sync
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 ```
 
 ## Quick Start
@@ -40,6 +43,7 @@ uv sync
 3. Enter your task and start interacting with the agent.
 
 ## Configuration
+![Model Selection](../../docs/assets/model_selection.png)
 
 ### Environment Variables
 
