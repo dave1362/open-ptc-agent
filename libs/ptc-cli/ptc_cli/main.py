@@ -77,12 +77,8 @@ def setup_logging() -> None:
     log_file = log_dir / "ptc-agent.log"
 
     # Configure file handler with rotation (10MB max, keep 5 backups)
-    file_handler = logging.handlers.RotatingFileHandler(
-        log_file, maxBytes=10 * 1024 * 1024, backupCount=5
-    )
-    file_handler.setFormatter(
-        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-    )
+    file_handler = logging.handlers.RotatingFileHandler(log_file, maxBytes=10 * 1024 * 1024, backupCount=5)
+    file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
 
     # Remove all existing handlers from root logger
     root = logging.getLogger()
@@ -194,9 +190,7 @@ def parse_args() -> argparse.Namespace:
     # Reset command
     reset_parser = subparsers.add_parser("reset", help="Reset an agent")
     reset_parser.add_argument("--agent", required=True, help="Name of agent to reset")
-    reset_parser.add_argument(
-        "--target", dest="source_agent", help="Copy prompt from another agent"
-    )
+    reset_parser.add_argument("--target", dest="source_agent", help="Copy prompt from another agent")
 
     # Default interactive mode
     parser.add_argument(
@@ -267,6 +261,7 @@ async def simple_cli(
     from ptc_cli.display import TokenTracker
     from ptc_cli.input import SandboxFileCompleter, create_prompt_session
     from ptc_cli.streaming import execute_task
+    from ptc_cli.streaming.errors import get_api_error_message, is_api_error
 
     if not no_splash:
         console.print(PTC_AGENT_ASCII, style=f"bold {COLORS['primary']}")
@@ -282,15 +277,11 @@ async def simple_cli(
     console.print()
 
     if session_state.plan_mode:
-        console.print(
-            "  [cyan]Plan Mode: ON[/cyan] [dim](agent will submit plan for approval before execution)[/dim]"
-        )
+        console.print("  [cyan]Plan Mode: ON[/cyan] [dim](agent will submit plan for approval before execution)[/dim]")
         console.print()
 
     if session_state.auto_approve:
-        console.print(
-            "  [yellow]Auto-approve: ON[/yellow] [dim](tools run without confirmation)[/dim]"
-        )
+        console.print("  [yellow]Auto-approve: ON[/yellow] [dim](tools run without confirmation)[/dim]")
         console.print()
 
     # Localize modifier names and show key symbols (macOS vs others)
@@ -301,8 +292,7 @@ async def simple_cli(
         )
     else:
         tips = (
-            "  Tips: Enter to submit, Alt+Enter (or Esc+Enter) for newline, "
-            "Ctrl+E to open editor, Shift+Tab to toggle plan mode, Ctrl+C to interrupt"
+            "  Tips: Enter to submit, Alt+Enter (or Esc+Enter) for newline, Ctrl+E to open editor, Shift+Tab to toggle plan mode, Ctrl+C to interrupt"
         )
     console.print(tips, style=f"dim {COLORS['dim']}")
 
@@ -383,10 +373,24 @@ async def simple_cli(
             console.print("\nGoodbye!", style=COLORS["primary"])
             break
 
-        await execute_task(
-            user_input, current_agent, assistant_id, session_state, token_tracker,
-            session=session, sandbox_completer=sandbox_completer,
-        )
+        try:
+            await execute_task(
+                user_input,
+                current_agent,
+                assistant_id,
+                session_state,
+                token_tracker,
+                session=session,
+                sandbox_completer=sandbox_completer,
+            )
+        except Exception as e:
+            # Safety net for API errors that weren't caught in execute_task
+            if is_api_error(e):
+                console.print()
+                console.print(get_api_error_message(e))
+                console.print()
+                continue  # Stay in CLI loop
+            raise  # Re-raise other exceptions
 
 
 async def main(

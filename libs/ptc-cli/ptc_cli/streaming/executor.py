@@ -19,6 +19,7 @@ from ptc_cli.display import (
 from ptc_cli.input import parse_file_mentions
 from ptc_cli.sandbox.health import EmptyResultTracker, check_sandbox_health
 from ptc_cli.sandbox.recovery import is_sandbox_error, recover_sandbox
+from ptc_cli.streaming.errors import get_api_error_message, is_api_error
 from ptc_cli.streaming.state import StreamingState
 from ptc_cli.streaming.tool_buffer import ToolCallChunkBuffer
 
@@ -183,9 +184,7 @@ async def execute_task(  # noqa: PLR0911
                     # Limit file content to reasonable size
                     if len(content) > _MAX_FILE_SIZE:
                         content = content[:_MAX_FILE_SIZE] + "\n... (file truncated)"
-                    context_parts.append(
-                        f"\n### {path}\nPath: `{sandbox_path}`\n```\n{content}\n```"
-                    )
+                    context_parts.append(f"\n### {path}\nPath: `{sandbox_path}`\n```\n{content}\n```")
             except Exception as e:  # noqa: BLE001
                 context_parts.append(f"\n### {path}\n[Error reading file: {e}]")
 
@@ -240,14 +239,16 @@ async def execute_task(  # noqa: PLR0911
     # Build messages - inject plan mode reminder if enabled
     messages = []
     if getattr(session_state, "plan_mode", False):
-        messages.append({
-            "role": "user",
-            "content": (
-                "<system-reminder>You are in Plan Mode. Before executing any write operations "
-                '(Write, Edit, Bash, execute_code), you MUST first call submit_plan(description="...") '
-                "with a detailed description of your plan for user review.</system-reminder>"
-            ),
-        })
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "<system-reminder>You are in Plan Mode. Before executing any write operations "
+                    '(Write, Edit, Bash, execute_code), you MUST first call submit_plan(description="...") '
+                    "with a detailed description of your plan for user review.</system-reminder>"
+                ),
+            }
+        )
     messages.append({"role": "user", "content": final_input})
 
     # Stream input - may need to loop if there are interrupts (plan mode)
@@ -283,9 +284,7 @@ async def execute_task(  # noqa: PLR0911
                         if interrupts:
                             for interrupt_obj in interrupts:
                                 try:
-                                    validated = _HITL_REQUEST_ADAPTER.validate_python(
-                                        interrupt_obj.value
-                                    )
+                                    validated = _HITL_REQUEST_ADAPTER.validate_python(interrupt_obj.value)
                                     pending_interrupts[interrupt_obj.id] = validated
                                     interrupt_occurred = True
                                 except ValidationError as e:
@@ -495,10 +494,7 @@ async def execute_task(  # noqa: PLR0911
                     # Check if auto-approve is enabled
                     if getattr(session_state, "auto_approve", False):
                         # Auto-approve all actions
-                        decisions = [
-                            {"type": "approve"}
-                            for _ in hitl_request.get("action_requests", [])
-                        ]
+                        decisions = [{"type": "approve"} for _ in hitl_request.get("action_requests", [])]
                         console.print()
                         console.print("[dim]⚡ Auto-approved plan[/dim]")
                     else:
@@ -512,9 +508,9 @@ async def execute_task(  # noqa: PLR0911
                                 # Put feedback in decision message for HITL to use in ToolMessage
                                 feedback_text = feedback or "No feedback provided"
                                 decision["message"] = (
-                                f"<system-reminder>Your plan was rejected. User feedback: {feedback_text}. "
-                                "You MUST submit the revised plan for review using submit_plan before proceeding.</system-reminder>"
-                            )
+                                    f"<system-reminder>Your plan was rejected. User feedback: {feedback_text}. "
+                                    "You MUST submit the revised plan for review using submit_plan before proceeding.</system-reminder>"
+                                )
 
                             decisions.append(decision)
 
@@ -523,9 +519,7 @@ async def execute_task(  # noqa: PLR0911
                 # Update spinner based on decision
                 if any_rejected:
                     console.print()
-                    console.print(
-                        "[yellow]Plan rejected. Agent will revise based on your feedback.[/yellow]"
-                    )
+                    console.print("[yellow]Plan rejected. Agent will revise based on your feedback.[/yellow]")
                     state.update_spinner(f"[bold {COLORS['thinking']}]Revising plan...")
                 else:
                     state.update_spinner(f"[bold {COLORS['thinking']}]Executing plan...")
@@ -555,6 +549,15 @@ async def execute_task(  # noqa: PLR0911
         return None
 
     except Exception as e:
+        # Handle API errors gracefully (rate limits, auth failures, connection errors)
+        if is_api_error(e):
+            if state.spinner_active:
+                state.stop_spinner()
+            console.print()
+            console.print(get_api_error_message(e))
+            console.print()
+            return None  # Return to CLI loop
+
         # Check if this is a sandbox-related error we can recover from
         error_msg = str(e)
         if is_sandbox_error(error_msg) and _retry_count == 0 and session:
@@ -591,16 +594,14 @@ async def execute_task(  # noqa: PLR0911
 
     # Refresh sandbox file cache in background (non-blocking)
     if session and session.sandbox and sandbox_completer:
+
         async def _refresh_cache() -> None:
             try:
                 sandbox = await session.get_sandbox()
                 files = sandbox.glob_files("**/*", path=".")
                 # Normalize paths (remove /home/daytona/ prefix)
                 home_prefix = "/home/daytona/"
-                normalized = [
-                    f.removeprefix(home_prefix)
-                    for f in files
-                ]
+                normalized = [f.removeprefix(home_prefix) for f in files]
                 sandbox_completer.set_files(normalized)
             except Exception:  # noqa: S110, BLE001
                 pass  # Silently ignore cache refresh errors
