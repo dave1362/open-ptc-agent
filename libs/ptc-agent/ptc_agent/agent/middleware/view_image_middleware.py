@@ -40,6 +40,28 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
+
+def _validate_list_arg(value: Any, param_name: str) -> str | None:
+    """Validate that a tool argument is a list, not a string.
+
+    Args:
+        value: The value to validate.
+        param_name: Name of the parameter for error messages.
+
+    Returns:
+        Error message if invalid, None if valid.
+    """
+    if value is None or isinstance(value, list):
+        return None
+    if isinstance(value, str):
+        return (
+            f"Invalid type for '{param_name}': expected a list, got a string. "
+            f'Pass an actual list like {param_name}=["path1.png", "path2.png"], '
+            f"not a string like {param_name}='[...]'."
+        )
+    return f"Invalid type for '{param_name}': expected a list, got {type(value).__name__}."
+
+
 # =============================================================================
 # Image Validation Constants and Functions
 # =============================================================================
@@ -432,9 +454,30 @@ class ViewImageMiddleware(AgentMiddleware):
         result = await handler(request)
 
         # Extract image sources from tool arguments
-        urls = tool_args.get("urls") or []
-        base64_images = tool_args.get("base64_images") or []
-        sandbox_paths = tool_args.get("sandbox_paths") or []
+        urls_raw = tool_args.get("urls")
+        base64_images_raw = tool_args.get("base64_images")
+        sandbox_paths_raw = tool_args.get("sandbox_paths")
+
+        # Validate that list arguments are actually lists, not strings
+        validation_errors = []
+        for raw_value, param_name in [
+            (urls_raw, "urls"),
+            (base64_images_raw, "base64_images"),
+            (sandbox_paths_raw, "sandbox_paths"),
+        ]:
+            error = _validate_list_arg(raw_value, param_name)
+            if error:
+                validation_errors.append(error)
+
+        if validation_errors:
+            return ToolMessage(
+                content=f"Error: {' '.join(validation_errors)}",
+                tool_call_id=tool_call_id,
+            )
+
+        urls = urls_raw or []
+        base64_images = base64_images_raw or []
+        sandbox_paths = sandbox_paths_raw or []
 
         # Build multimodal content blocks
         content_blocks = []
