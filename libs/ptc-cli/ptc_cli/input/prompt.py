@@ -48,15 +48,32 @@ def get_bottom_toolbar(
             # Silently ignore - toolbar is non-critical and called frequently
             pass
 
-        # Show running subagent count
+        # Show background subagent status (running + completed-unseen)
         try:
             if agent_ref:
                 agent = agent_ref.get("agent")
                 if agent and hasattr(agent, "middleware") and hasattr(agent.middleware, "registry"):
-                    count = agent.middleware.registry.pending_count
-                    if count > 0:
-                        label = "subagent" if count == 1 else "subagents"
-                        parts.append(("class:toolbar-cyan", f" {count} {label} running "))
+                    registry = agent.middleware.registry
+
+                    running = getattr(registry, "pending_count", 0)
+                    completed_unseen = 0
+
+                    tasks = getattr(registry, "_tasks", {})
+                    for task in tasks.values():
+                        asyncio_task = getattr(task, "asyncio_task", None)
+                        # Avoid counting a task as "completed" until it is truly finished and we have
+                        # either an explicit completed flag or some terminal state captured.
+                        is_done = bool(getattr(task, "completed", False)) or bool(asyncio_task and asyncio_task.done())
+                        has_terminal_info = (
+                            bool(getattr(task, "completed", False))
+                            or getattr(task, "result", None) is not None
+                            or getattr(task, "error", None) is not None
+                        )
+                        if is_done and has_terminal_info and not getattr(task, "result_seen", False):
+                            completed_unseen += 1
+
+                    if running > 0 or completed_unseen > 0:
+                        parts.append(("class:toolbar-cyan", f" {running} running | {completed_unseen} completed "))
                         parts.append(("", " | "))
         except (AttributeError, TypeError):
             # Silently ignore - toolbar is non-critical
@@ -137,6 +154,7 @@ def create_prompt_session(
             buffer.reset()
             session_state.ctrl_c_count = 0
             session_state.exit_hint_until = None
+            session_state.exit_requested = False
             if session_state.exit_hint_handle:
                 session_state.exit_hint_handle.cancel()
                 session_state.exit_hint_handle = None
@@ -159,6 +177,7 @@ def create_prompt_session(
         if session_state.ctrl_c_count >= CTRL_C_EXIT_COUNT:
             # Third press - exit
             session_state.exit_hint_handle = None
+            session_state.exit_requested = True
             app.exit(exception=KeyboardInterrupt())
             return
 
@@ -267,6 +286,7 @@ def create_prompt_session(
         enable_open_in_editor=True,  # Allow Ctrl+X Ctrl+E to open external editor
         bottom_toolbar=get_bottom_toolbar(session_state, session_ref, agent_ref),  # Persistent status bar at bottom
         style=toolbar_style,  # Apply toolbar styling
+        refresh_interval=0.5,
         reserve_space_for_menu=7,  # Reserve space for completion menu to show 5-6 results
     )
 

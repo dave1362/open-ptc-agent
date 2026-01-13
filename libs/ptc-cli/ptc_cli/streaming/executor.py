@@ -1,12 +1,22 @@
+# pyright: reportGeneralTypeIssues=false
 """Task execution and streaming logic for the CLI."""
 
 import asyncio
-from typing import TYPE_CHECKING
+import os
+import select
+import sys
+import threading
+from collections.abc import Callable
+from contextlib import suppress
+from typing import TYPE_CHECKING, Any, Protocol
 
 import structlog
 from rich import box
+from rich.console import Console
+from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.text import Text
 
 from ptc_cli.core import COLORS, console
 from ptc_cli.display import (
@@ -23,9 +33,16 @@ from ptc_cli.streaming.errors import get_api_error_message, is_api_error
 from ptc_cli.streaming.state import StreamingState
 from ptc_cli.streaming.tool_buffer import ToolCallChunkBuffer
 
-if TYPE_CHECKING:
-    from typing import Any
+termios: Any | None
+tty: Any | None
+try:
+    import termios
+    import tty
+except ImportError:  # pragma: no cover
+    termios = None
+    tty = None
 
+if TYPE_CHECKING:
     from ptc_cli.core.state import SessionState
 
 logger = structlog.get_logger(__name__)
@@ -47,6 +64,188 @@ except ImportError:
     HITL_AVAILABLE = False
     _HITL_REQUEST_ADAPTER = None
     Command = None  # type: ignore[misc, assignment]
+
+
+class _EscInterruptWatcher:
+    """Watches for ESC key presses during streaming.
+
+    prompt-toolkit keybindings only work while PromptSession is active. During streaming
+    we need a separate watcher so users can interrupt with ESC.
+    """
+
+    def __init__(self, *, loop: asyncio.AbstractEventLoop, on_escape: Callable[[], None]) -> None:
+        self._loop = loop
+        self._on_escape = on_escape
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        if not sys.stdin.isatty() or termios is None or tty is None:
+            return
+
+        self._thread = threading.Thread(target=self._run, name="esc_interrupt_watcher", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=0.5)
+
+    def _run(self) -> None:
+        if termios is None or tty is None:
+            return
+
+        fd = sys.stdin.fileno()
+        try:
+            old_attrs = termios.tcgetattr(fd)
+        except OSError:
+            return
+
+        try:
+            tty.setcbreak(fd)
+            while not self._stop.is_set():
+                readable, _w, _x = select.select([fd], [], [], 0.1)
+                if not readable:
+                    continue
+
+                ch = os.read(fd, 1)
+                if ch == b"\x1b":  # ESC
+                    with suppress(Exception):
+                        self._loop.call_soon_threadsafe(self._on_escape)
+                    return
+        finally:
+            with suppress(Exception):
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+
+
+class _BackgroundTask(Protocol):
+    completed: bool
+    result_seen: bool
+    display_id: str
+    asyncio_task: asyncio.Task[object] | None
+    result: object | None
+    error: str | None
+
+
+class _BackgroundTaskRegistry(Protocol):
+    _tasks: dict[str, _BackgroundTask]
+
+
+def _format_task_status_line(registry: _BackgroundTaskRegistry) -> Text:
+    """Format a status line showing background task states.
+
+    Args:
+        registry: BackgroundTaskRegistry instance
+
+    Returns:
+        Rich Text object with formatted status
+    """
+    tasks = list(registry._tasks.values())
+    if not tasks:
+        return Text("")
+
+    # Sync completion status for all tasks
+    for task in tasks:
+        if not task.completed and task.asyncio_task and task.asyncio_task.done():
+            task.completed = True
+            try:
+                task.result = task.asyncio_task.result()
+            except BaseException as e:  # noqa: BLE001
+                task.error = str(e)
+                task.result = {"success": False, "error": str(e)}
+
+    running = [t for t in tasks if not t.completed]
+    completed = [t for t in tasks if t.completed and not t.result_seen]
+
+    text = Text()
+
+    if running:
+        text.append("Running: ", style="dim")
+        for i, t in enumerate(running):
+            if i > 0:
+                text.append(", ", style="dim")
+            text.append(t.display_id, style="cyan")
+        if completed:
+            text.append("  |  ", style="dim")
+
+    if completed:
+        text.append("Completed: ", style="dim green")
+        for i, t in enumerate(completed):
+            if i > 0:
+                text.append(", ", style="dim")
+            text.append(t.display_id, style="green")
+
+    if running:
+        text.append("\n", style="dim")
+        text.append("Use task_output() to check progress or results", style="dim")
+
+    return text
+
+
+async def _display_live_task_status(registry: _BackgroundTaskRegistry, console: Console) -> None:
+    """Display live-updating status of background tasks.
+
+    Shows running and completed tasks, updating in real-time until
+    all tasks complete or max wait time passes.
+
+    Args:
+        registry: BackgroundTaskRegistry instance
+        console: Rich Console instance
+    """
+    # Sync completion status for all tasks first
+    for task in registry._tasks.values():
+        if not task.completed and task.asyncio_task and task.asyncio_task.done():
+            task.completed = True
+            try:
+                task.result = task.asyncio_task.result()
+            except BaseException as e:  # noqa: BLE001
+                task.error = str(e)
+                task.result = {"success": False, "error": str(e)}
+
+    # Initial check
+    running = [t for t in registry._tasks.values() if not t.completed]
+
+    if not running:
+        # All already completed, just show static status
+        status_text = _format_task_status_line(registry)
+        if status_text:
+            console.print(status_text)
+        return
+
+    # Track initial state BEFORE the loop
+    prev_running_count = len(running)
+    last_change_time = asyncio.get_event_loop().time()
+    max_wait = 30.0
+
+    # Use Live display for real-time updates
+    with Live(_format_task_status_line(registry), console=console, refresh_per_second=2, transient=False) as live:
+        while True:
+            await asyncio.sleep(0.5)
+
+            # Update status (this syncs completion internally via _format_task_status_line)
+            status_text = _format_task_status_line(registry)
+            live.update(status_text)
+
+            # Count currently running tasks
+            curr_running_count = len([t for t in registry._tasks.values() if not t.completed])
+
+            # Check if state changed
+            if curr_running_count != prev_running_count:
+                last_change_time = asyncio.get_event_loop().time()
+                prev_running_count = curr_running_count
+
+            # Exit conditions
+            if curr_running_count == 0:
+                # All tasks completed
+                await asyncio.sleep(0.5)  # Brief pause to show final status
+                break
+
+            elapsed = asyncio.get_event_loop().time() - last_change_time
+            if elapsed > max_wait:
+                # Been waiting too long, stop updating
+                break
 
 
 async def _prompt_for_plan_approval(action_request: dict) -> tuple[dict, str | None]:
@@ -145,7 +344,7 @@ async def _prompt_for_plan_approval(action_request: dict) -> tuple[dict, str | N
         return {"type": "reject"}, (feedback or "No feedback provided")
 
 
-async def execute_task(  # noqa: PLR0911
+async def execute_task(  # noqa: PLR0911  # pyright: ignore[reportGeneralTypeIssues]
     user_input: str,
     agent: "Any",  # noqa: ANN401
     assistant_id: str | None,
@@ -169,6 +368,22 @@ async def execute_task(  # noqa: PLR0911
         background_registry: Optional BackgroundTaskRegistry for status display
         _retry_count: Internal retry counter (do not set manually)
     """
+    # Check for completed background tasks and inject notification
+    background_notification = None
+    if hasattr(agent, "check_and_get_notification"):
+        background_notification = await agent.check_and_get_notification()
+        if background_notification:
+            console.print()
+            console.print(
+                Panel(
+                    Markdown(background_notification),
+                    title="[bold cyan]Background Tasks Completed[/bold cyan]",
+                    border_style="cyan",
+                    box=box.ROUNDED,
+                )
+            )
+            console.print()
+
     # Parse file mentions and inject content from sandbox
     prompt_text, mentioned_paths = parse_file_mentions(user_input)
 
@@ -234,6 +449,8 @@ async def execute_task(  # noqa: PLR0911
         "web_search": "🌐",
         "http_request": "🌍",
         "task": "🤖",
+        "wait": "⏳",
+        "task_output": "📤",
         "write_todos": "📋",
         "submit_plan": "📋",
     }
@@ -251,11 +468,27 @@ async def execute_task(  # noqa: PLR0911
                 ),
             }
         )
+    # Inject background task notification if there is one
+    if background_notification:
+        messages.append({"role": "user", "content": f"[SYSTEM NOTIFICATION]\n{background_notification}"})
     messages.append({"role": "user", "content": final_input})
 
     # Stream input - may need to loop if there are interrupts (plan mode)
     # Type as Any since it can be either a dict or Command
     stream_input: Any = {"messages": messages}
+
+    # Allow ESC to interrupt the foreground stream (without exiting the CLI).
+    # Ctrl+C remains a hard-exit via SIGINT.
+    loop = asyncio.get_running_loop()
+    this_task = asyncio.current_task()
+
+    def _on_escape() -> None:
+        session_state.esc_interrupt_requested = True
+        if this_task is not None:
+            this_task.cancel()
+
+    esc_watcher = _EscInterruptWatcher(loop=loop, on_escape=_on_escape)
+    esc_watcher.start()
 
     try:
         while True:  # Interrupt loop for plan mode approval
@@ -421,8 +654,8 @@ async def execute_task(  # noqa: PLR0911
                                 console.print()
                                 console.print(truncate_error(tool_content), style="red", markup=False)
                                 console.print()
-                            elif tool_name in ("task", "wait", "task_progress"):
-                                # The task tool returns subagent results via ToolMessage; show them so
+                            elif tool_name in ("task", "wait", "task_output"):
+                                # Background task tools return results via ToolMessage; show them so
                                 # users aren't left waiting if the agent doesn't echo/summarize.
                                 state.flush_text(final=True)
                                 if state.spinner_active:
@@ -432,7 +665,7 @@ async def execute_task(  # noqa: PLR0911
                                 title = {
                                     "task": "Subagent result",
                                     "wait": "Subagent results",
-                                    "task_progress": "Subagent progress",
+                                    "task_output": "Task output",
                                 }.get(tool_name, f"{tool_name} result")
 
                                 tool_call_id = getattr(message, "tool_call_id", "")
@@ -575,19 +808,23 @@ async def execute_task(  # noqa: PLR0911
                     else:
                         # Prompt user for approval
                         decisions = []
-                        for action_request in hitl_request.get("action_requests", []):
-                            decision, feedback = await _prompt_for_plan_approval(action_request)
+                        esc_watcher.stop()
+                        try:
+                            for action_request in hitl_request.get("action_requests", []):
+                                decision, feedback = await _prompt_for_plan_approval(action_request)
 
-                            if decision.get("type") == "reject":
-                                any_rejected = True
-                                # Put feedback in decision message for HITL to use in ToolMessage
-                                feedback_text = feedback or "No feedback provided"
-                                decision["message"] = (
-                                    f"<system-reminder>Your plan was rejected. User feedback: {feedback_text}. "
-                                    "You MUST submit the revised plan for review using submit_plan before proceeding.</system-reminder>"
-                                )
+                                if decision.get("type") == "reject":
+                                    any_rejected = True
+                                    # Put feedback in decision message for HITL to use in ToolMessage
+                                    feedback_text = feedback or "No feedback provided"
+                                    decision["message"] = (
+                                        f"<system-reminder>Your plan was rejected. User feedback: {feedback_text}. "
+                                        "You MUST submit the revised plan for review using submit_plan before proceeding.</system-reminder>"
+                                    )
 
-                            decisions.append(decision)
+                                decisions.append(decision)
+                        finally:
+                            esc_watcher.start()
 
                     hitl_response[interrupt_id] = {"decisions": decisions}
 
@@ -609,19 +846,28 @@ async def execute_task(  # noqa: PLR0911
                 # No interrupt, break out of while loop
                 break
 
+        # After streaming completes, check for background tasks and display live status
+        if hasattr(agent, "middleware") and hasattr(agent.middleware, "registry"):
+            registry = agent.middleware.registry
+            if registry.task_count > 0:
+                console.print()
+                await _display_live_task_status(registry, console)
+
     except asyncio.CancelledError:
-        # Event loop cancelled the task
-        if state.spinner_active:
-            state.stop_spinner()
-        console.print("\n[yellow]Interrupted by user[/yellow]")
-        return None
+        # ESC interrupt cancels only the foreground stream.
+        # Ctrl+C exits the entire CLI (SIGINT) and should not be swallowed.
+        if getattr(session_state, "esc_interrupt_requested", False):
+            session_state.esc_interrupt_requested = False
+            if state.spinner_active:
+                state.stop_spinner()
+            console.print("\n[yellow]Interrupted (Esc)[/yellow]")
+            return None
+        raise
 
     except KeyboardInterrupt:
-        # User pressed Ctrl+C
-        if state.spinner_active:
-            state.stop_spinner()
-        console.print("\n[yellow]Interrupted by user[/yellow]")
-        return None
+        # Ctrl+C exits the CLI during streaming.
+        raise
+
 
     except Exception as e:
         # Handle API errors gracefully (rate limits, auth failures, connection errors)
@@ -658,6 +904,9 @@ async def execute_task(  # noqa: PLR0911
             return None  # Recovery failed, stop
         # Re-raise non-sandbox errors
         raise
+
+    finally:
+        esc_watcher.stop()
 
     if state.spinner_active:
         state.stop_spinner()

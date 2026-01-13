@@ -35,11 +35,18 @@ class SessionState:
         self.esc_hint_handle: TimerHandle | None = None
         self.last_user_message: str | None = None
         self.revision_requested: bool = False
+        self.esc_interrupt_requested: bool = False
 
         # Ctrl+C exit handling (triple press to exit)
+        # NOTE: PromptSession may also raise a raw KeyboardInterrupt (terminal signal).
+        # Track explicit exit requests to avoid quitting the CLI unintentionally.
         self.exit_hint_until: float | None = None
         self.exit_hint_handle: TimerHandle | None = None
         self.ctrl_c_count: int = 0
+        self.exit_requested: bool = False
+        self.last_interrupt_time: float | None = None
+        self.last_exit_reason: str | None = None
+        self.log_file_path: str | None = None
 
     def toggle_auto_approve(self) -> bool:
         """Toggle auto-approve and return new state."""

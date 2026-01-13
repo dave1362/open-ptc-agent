@@ -12,16 +12,19 @@ import asyncio
 import importlib.util
 import os
 import sys
+import time
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-if TYPE_CHECKING:
-    from ptc_agent.agent.agent import PTCAgent
-    from ptc_agent.agent.middleware.background.orchestrator import BackgroundSubagentOrchestrator
-    from ptc_agent.config.agent import AgentConfig
-    from ptc_agent.core.session import Session
+import structlog
 
+logger = structlog.get_logger(__name__)
+
+
+if TYPE_CHECKING:
+    from ptc_cli.commands.slash import _PTCAgent, _SessionManager
     from ptc_cli.core.state import SessionState
 
 
@@ -29,9 +32,9 @@ if TYPE_CHECKING:
 class ModelSwitchContext:
     """Context for model switching during a session."""
 
-    agent_config: "AgentConfig"
-    ptc_agent: "PTCAgent"
-    session: "Session"
+    agent_config: Any
+    ptc_agent: Any
+    session: Any
     agent_ref: dict[str, Any] = field(default_factory=dict)
     checkpointer: Any = None
 
@@ -64,20 +67,46 @@ class ModelSwitchContext:
         self.agent_ref["agent"] = new_agent
 
 
-def setup_logging() -> None:
-    """Redirect logging to file for cleaner CLI experience.
+def _cleanup_old_logs(log_dir: Path, *, keep_days: int = 7) -> None:
+    """Remove log files older than keep_days.
 
-    Logs are written to ~/.ptc-agent/logs/ptc-agent.log with rotation.
+    Best-effort cleanup to prevent ~/.ptc-agent/logs growing without bound.
+    """
+    cutoff = time.time() - (keep_days * 24 * 60 * 60)
+    try:
+        for path in log_dir.glob("*.log"):
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink(missing_ok=True)
+            except OSError as e:
+                logger.debug("cli_log_cleanup_file_failed", path=str(path), error=str(e))
+                continue
+    except OSError as e:
+        logger.debug("cli_log_cleanup_failed", log_dir=str(log_dir), error=str(e))
+
+
+def setup_logging(*, agent_name: str) -> Path:
+    """Redirect logging to a per-session log file.
+
+    A new log file is created per CLI session. Old logs (>7 days) are cleaned up.
+
+    Returns:
+        Path to the session log file.
     """
     import logging.handlers
 
     # Create log directory
     log_dir = Path.home() / ".ptc-agent" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / "ptc-agent.log"
+    _cleanup_old_logs(log_dir, keep_days=7)
 
-    # Configure file handler with rotation (10MB max, keep 5 backups)
-    file_handler = logging.handlers.RotatingFileHandler(log_file, maxBytes=10 * 1024 * 1024, backupCount=5)
+    # One log per session
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    safe_agent = "".join(c for c in agent_name if c.isalnum() or c in ("-", "_")) or "agent"
+    log_file = log_dir / f"ptc-agent-{safe_agent}-{timestamp}-{os.getpid()}.log"
+    os.environ["PTC_CLI_LOG_FILE"] = str(log_file)
+
+    file_handler = logging.FileHandler(log_file)
     file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
 
     # Remove all existing handlers from root logger
@@ -125,6 +154,8 @@ def setup_logging() -> None:
         )
     except ImportError:
         pass
+
+    return log_file
 
 
 def check_cli_dependencies() -> None:
@@ -227,15 +258,15 @@ def parse_args() -> argparse.Namespace:
 
 
 async def simple_cli(
-    agent: "BackgroundSubagentOrchestrator",
-    session: "Session",
+    agent: "_PTCAgent",
+    session: "_SessionManager | None",
     assistant_id: str | None,
     session_state: "SessionState",
     baseline_tokens: int = 0,
     *,
     no_splash: bool = False,
-    ptc_agent: "PTCAgent | None" = None,
-    config: "AgentConfig | None" = None,
+    ptc_agent: object | None = None,
+    config: object | None = None,
 ) -> None:
     """Main CLI loop.
 
@@ -327,6 +358,13 @@ async def simple_cli(
             checkpointer=getattr(agent, "checkpointer", None),
         )
 
+    logger.info(
+        "cli_loop_start",
+        assistant_id=assistant_id,
+        stdin_isatty=sys.stdin.isatty(),
+        log_file=os.environ.get("PTC_CLI_LOG_FILE"),
+    )
+
     while True:
         try:
             user_input = await prompt_session.prompt_async()
@@ -334,18 +372,59 @@ async def simple_cli(
                 session_state.exit_hint_handle.cancel()
                 session_state.exit_hint_handle = None
             session_state.exit_hint_until = None
+            session_state.exit_requested = False
+            raw_user_input = user_input
             user_input = user_input.strip()
+            logger.info(
+                "cli_input_received",
+                raw=repr(raw_user_input),
+                stripped=repr(user_input),
+                length=len(user_input),
+            )
+
         except EOFError:
-            break
+            # prompt-toolkit can surface an EOFError transiently (especially after interrupts / heavy TUI redraw).
+            # In TTY mode, treat this as a recoverable prompt glitch and *never* exit the CLI.
+            # Users can still exit explicitly via /exit or exit.
+            session_state.last_exit_reason = "prompt_eoferror"
+            if not sys.stdin.isatty():
+                session_state.last_exit_reason = "stdin_eof_notty"
+                logger.warning("cli_prompt_eof_notty_exit")
+                break
+
+            logger.warning(
+                "cli_prompt_eof_recovered",
+                stdin_isatty=True,
+                last_interrupt_time=getattr(session_state, "last_interrupt_time", None),
+                bg_tasks=getattr(getattr(getattr(agent_ref.get("agent"), "middleware", None), "registry", None), "task_count", None),
+            )
+
+            prompt_session = create_prompt_session(assistant_id, session_state, sandbox_completer, agent_ref)
+            continue
         except KeyboardInterrupt:
-            console.print("\nGoodbye!", style=COLORS["primary"])
-            break
+            # PromptSession can raise a raw KeyboardInterrupt (terminal signal).
+            # Only treat it as an exit if our keybinding explicitly requested exit.
+            if getattr(session_state, "exit_requested", False):
+                session_state.last_exit_reason = "ctrlc_triple_exit"
+                logger.info("cli_exit", reason=session_state.last_exit_reason)
+                console.print("\nGoodbye!", style=COLORS["primary"])
+                break
+
+            session_state.ctrl_c_count = 0
+            session_state.exit_hint_until = None
+            session_state.exit_requested = False
+            if session_state.exit_hint_handle:
+                session_state.exit_hint_handle.cancel()
+                session_state.exit_hint_handle = None
+            continue
 
         if not user_input:
             continue
 
         # Get current agent (may change after /model command)
+        logger.info("cli_dispatch_start", stripped=repr(user_input))
         current_agent = agent_ref["agent"]
+        logger.info("cli_agent_selected", agent_type=type(current_agent).__name__)
 
         # Check for slash commands first
         if user_input.startswith("/"):
@@ -358,6 +437,8 @@ async def simple_cli(
                 model_switch_context=model_switch_context,
             )
             if result == "exit":
+                session_state.last_exit_reason = "slash_exit"
+                logger.info("cli_exit", reason=session_state.last_exit_reason)
                 console.print("\nGoodbye!", style=COLORS["primary"])
                 break
             if result:
@@ -372,6 +453,8 @@ async def simple_cli(
 
         # Handle regular quit keywords
         if user_input.lower() in ["quit", "exit", "q"]:
+            session_state.last_exit_reason = f"quit_keyword:{user_input.lower()}"
+            logger.info("cli_exit", reason=session_state.last_exit_reason)
             console.print("\nGoodbye!", style=COLORS["primary"])
             break
 
@@ -380,6 +463,16 @@ async def simple_cli(
             bg_registry = None
             if hasattr(current_agent, "middleware") and hasattr(current_agent.middleware, "registry"):
                 bg_registry = current_agent.middleware.registry
+
+            # Debug: record what we're about to run
+            session_state.last_exit_reason = None
+
+            logger.info(
+                "cli_execute_task_start",
+                stripped=repr(user_input),
+                bg_task_count=getattr(bg_registry, "task_count", None),
+                bg_pending=getattr(bg_registry, "pending_count", None),
+            )
 
             await execute_task(
                 user_input,
@@ -391,6 +484,16 @@ async def simple_cli(
                 sandbox_completer=sandbox_completer,
                 background_registry=bg_registry,
             )
+
+        except SystemExit as e:
+            # Something invoked sys.exit()/SystemExit during dispatch.
+            # In interactive mode this is almost always unintended; recover and keep the CLI alive.
+            session_state.last_exit_reason = f"system_exit:{getattr(e, 'code', None)}"
+            logger.exception("cli_dispatch_system_exit_recovered", code=getattr(e, "code", None))
+            if sys.stdin.isatty():
+                prompt_session = create_prompt_session(assistant_id, session_state, sandbox_completer, agent_ref)
+                continue
+            raise
         except Exception as e:
             # Safety net for API errors that weren't caught in execute_task
             if is_api_error(e):
@@ -398,7 +501,20 @@ async def simple_cli(
                 console.print(get_api_error_message(e))
                 console.print()
                 continue  # Stay in CLI loop
-            raise  # Re-raise other exceptions
+            logger.exception("cli_dispatch_exception")
+            raise
+        except BaseException as e:
+            # Log and re-raise unexpected BaseException so we can see the real root cause.
+            session_state.last_exit_reason = f"base_exception:{type(e).__name__}"
+            logger.exception("cli_dispatch_base_exception")
+            raise
+
+    logger.info(
+        "cli_loop_end",
+        assistant_id=assistant_id,
+        last_exit_reason=getattr(session_state, "last_exit_reason", None),
+        log_file=getattr(session_state, "log_file_path", None) or os.environ.get("PTC_CLI_LOG_FILE"),
+    )
 
 
 async def main(
@@ -441,11 +557,12 @@ async def main(
         original_stdout_fd = os.dup(sys.stdout.fileno())
 
         # Redirect stdout/stderr at FD level to capture subprocess output
-        log_dir = Path.home() / ".ptc-agent" / "logs"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        init_log = log_dir / "init.log"
+        # Use the same per-session log file so we keep one log per session.
+        log_path = Path(os.environ.get("PTC_CLI_LOG_FILE", str(Path.home() / ".ptc-agent" / "logs" / "ptc-agent.log")))
+        log_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with init_log.open("a") as log_file:
+        log_file = await asyncio.to_thread(log_path.open, "a")
+        try:
             # Redirect at file descriptor level (affects subprocesses!)
             os.dup2(log_file.fileno(), sys.stdout.fileno())
             os.dup2(log_file.fileno(), sys.stderr.fileno())
@@ -477,12 +594,17 @@ async def main(
                 os.dup2(original_stdout_fd, sys.stdout.fileno())
                 os.dup2(original_stderr_fd, sys.stderr.fileno())
                 os.close(original_stdout_fd)
+        finally:
+            log_file.close()
 
         if session_state.reusing_sandbox:
             console.print("[green]✓ Reconnected to existing sandbox[/green]")
         else:
             console.print("[green]✓ Agent initialized[/green]")
+        if getattr(session_state, "log_file_path", None):
+            console.print(f"[dim]Log: {session_state.log_file_path}[/dim]")
         console.print()
+
 
         await simple_cli(
             agent,
@@ -494,6 +616,11 @@ async def main(
             config=config,
         )
 
+    except asyncio.CancelledError as e:
+        # asyncio.run() cancels the main task on SIGINT.
+        # Convert to KeyboardInterrupt so cli_main can exit cleanly.
+        error_occurred = True
+        raise KeyboardInterrupt from e
     except KeyboardInterrupt:
         error_occurred = True
         console.print("\n\n[yellow]Interrupted[/yellow]")
@@ -506,6 +633,16 @@ async def main(
         console.print_exception()
         sys.exit(1)
     finally:
+        with suppress(Exception):
+            logger.info(
+                "cli_main_finally",
+                assistant_id=assistant_id,
+                error_occurred=error_occurred,
+                last_exit_reason=getattr(session_state, "last_exit_reason", None),
+                log_file=getattr(session_state, "log_file_path", None) or os.environ.get("PTC_CLI_LOG_FILE"),
+                stdin_isatty=sys.stdin.isatty(),
+            )
+
         # Cleanup session with progress spinner
         if session is not None:
             # Skip cleanup if persisting session and no error occurred
@@ -566,8 +703,11 @@ def cli_main() -> None:
     # Check dependencies first
     check_cli_dependencies()
 
-    # Redirect logging to file for clean CLI output
-    setup_logging()
+    # Parse args early so logging can be per-session
+    args = parse_args()
+
+    # Redirect logging to per-session file for clean CLI output
+    log_path = setup_logging(agent_name=args.agent)
 
     # Import after dependency check
     from ptc_cli.agent import list_agents, reset_agent
@@ -575,7 +715,6 @@ def cli_main() -> None:
     from ptc_cli.display import show_help
 
     try:
-        args = parse_args()
 
         if args.command == "help":
             show_help()
@@ -591,6 +730,7 @@ def cli_main() -> None:
                 persist_session=not args.new_sandbox,
                 plan_mode=args.plan_mode,
             )
+            session_state.log_file_path = str(log_path)
 
             asyncio.run(
                 main(

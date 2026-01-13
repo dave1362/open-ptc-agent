@@ -1,5 +1,6 @@
 """API error detection and formatting for graceful error handling."""
 
+import os
 import re
 
 import structlog
@@ -104,7 +105,7 @@ def get_api_error_message(e: Exception) -> str:
         f"[red]{title}[/red]",
         f"  {message}",
         "",
-        "[dim]Check ~/.ptc-agent/logs/ptc-agent.log for full details.[/dim]",
+        f"[dim]Check {os.environ.get('PTC_CLI_LOG_FILE', '~/.ptc-agent/logs')} for full details.[/dim]",
     ]
 
     return "\n".join(lines)

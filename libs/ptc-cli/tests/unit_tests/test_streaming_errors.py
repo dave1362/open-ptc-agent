@@ -102,7 +102,7 @@ class TestGetApiErrorMessage:
 
         assert "[red]Rate limit exceeded[/red]" in result
         assert "usage limit exceeded" in result
-        assert "~/.ptc-agent/logs/ptc-agent.log" in result
+        assert "~/.ptc-agent/logs" in result
 
     def test_auth_error_message_format(self):
         """Test that authentication errors produce correct message format."""
@@ -151,5 +151,5 @@ class TestGetApiErrorMessage:
         error = Exception("test error")
         result = get_api_error_message(error)
 
-        assert "~/.ptc-agent/logs/ptc-agent.log" in result
+        assert "~/.ptc-agent/logs" in result
         assert "[dim]" in result  # Check it's dimmed
