@@ -57,8 +57,9 @@ User Task
 ## 最新更新
 
 - **交互式 CLI** - 新增 `ptc-agent` 命令，提供基于终端的交互界面，支持沙盒持久化、Plan模式、主题，和快捷切换模型
-- **后台子 Agent 执行** - 子 Agent 现在使用"fire and collect"模式异步运行，主 Agent 可主动控制任务分发时机。即使不显式调用 `wait()`，任务结果也会在完成后自动返回给 Agent
-- **任务监控** - 新增 `wait()` 和 `task_progress()` 工具，用于监控和收集后台任务结果
+- **后台子 Agent 执行** - 子 Agent 使用 Task ID（Task-1、Task-2 等）异步运行。主 Agent 在子 Agent 并行执行时继续工作。已完成的结果被缓存，并通知 Agent 通过 `task_output()` 获取
+- **任务监控** - `wait()` 阻塞等待任务完成；`task_output()` 获取结果或显示进度
+- **Agent Skills** - 通过开放的 [Agent Skills](https://agentskills.io) 标准提供可扩展能力
 - **视觉/多模态支持** - 新增 `view_image` 工具，使具有视觉能力的 LLM 能够分析来自 URL、base64 数据或沙箱文件的图像
 
 
@@ -67,6 +68,7 @@ User Task
 - **通用 MCP 支持** - 自动将任何 MCP 服务器工具转换为 Python 函数
 - **渐进式工具发现** - 按需发现工具；避免预先定义大量 token 的工具定义
 - **自定义 MCP 上传** - 直接将 Python MCP 实现部署到沙箱会话中
+- **Agent Skills** - 自定义工作流技能
 - **增强文件工具** - 针对沙箱环境优化的 glob、grep 和其他文件操作工具
 - **Daytona 后端** - 具有文件系统隔离和快照支持的安全代码执行
 - **自动图片上传** - 图表和图像自动上传到云存储（Cloudflare R2、AWS S3、阿里云 OSS）
@@ -91,6 +93,13 @@ User Task
 │           ├── display/       # Rich 终端渲染
 │           ├── input/         # 提示、补全器、文件提及
 │           └── streaming/     # 工具审批、执行
+│
+├── skills/                    # 演示技能（来自 Anthropic）
+│   ├── pdf/                   # PDF 操作
+│   ├── xlsx/                  # 电子表格操作
+│   ├── docx/                  # 文档创建
+│   ├── pptx/                  # 演示文稿创建
+│   └── creating-financial-models/  # 财务建模
 │
 ├── mcp_servers/               # 演示用 MCP 服务器实现
 │   ├── yfinance_mcp_server.py
@@ -126,7 +135,7 @@ Agent 可以访问原生工具以及来自 [deep-agent](https://github.com/langc
 | 中间件 | 描述 | 提供的工具 |
 |--------|------|-----------|
 | **SubagentsMiddleware** | 将专门任务委托给具有隔离执行的子 Agent | `task()` |
-| **BackgroundSubagentMiddleware** | 异步子 Agent 执行（fire and collect 模式） | `wait()`, `task_progress()` |
+| **BackgroundSubagentMiddleware** | 异步子 Agent 执行，支持后台任务和基于通知的结果收集 | `wait()`, `task_output()` |
 | **ViewImageMiddleware** | 将图像注入对话以供多模态 LLM 使用 | `view_image()` |
 | **FilesystemMiddleware** | 文件操作 | `read_file`, `write_file`, `edit_file`, `glob`, `grep`, `ls` |
 | **TodoListMiddleware** | 任务规划和进度跟踪（自动启用） | `write_todos` |
@@ -136,7 +145,13 @@ Agent 可以访问原生工具以及来自 [deep-agent](https://github.com/langc
 - `research` - 使用 Tavily 进行网络搜索 + think 工具进行战略性反思
 - `general-purpose` - 完整的 execute_code、文件系统和视觉工具，用于复杂的多步骤任务
 
-子 Agent 默认在后台运行 - 主 Agent 可以在委托任务异步执行时继续工作。
+**后台执行模型：**
+当 Agent 调用 `task()` 时，子 Agent 被分配顺序 ID（Task-1、Task-2 等）并在后台运行。主 Agent：
+1. 立即收到包含 Task ID 的确认
+2. 在子 Agent 并行执行时继续其他工作
+3. 当任务完成时收到通知
+4. 调用 `task_output()` 获取缓存的结果
+5. 如需要，使用 `wait(task_number=N)` 阻塞等待特定任务
 
 ## MCP 集成
 
@@ -189,6 +204,61 @@ summary = {"mean": df["close"].mean(), "volatility": df["close"].std()}
 # 只有摘要返回给模型
 print(summary)
 ```
+
+## Skills
+
+[Agent Skills](https://agentskills.io) 是 Anthropic 发布的开放标准，用于将领域专业知识打包成可重用的指令和资源文件夹。Skills 通过**渐进式发现**动态加载 - 启动时仅加载元数据，完整内容按需加载。
+
+### 包含的演示 Skills
+
+演示中包含来自 [anthropics/skills](https://github.com/anthropics/skills) 的 Skills：
+
+| Skill | 描述 |
+|-------|------|
+| **pdf** | PDF 操作 - 提取文本/表格、创建、合并/拆分、填写表单 |
+| **xlsx** | 电子表格创建，支持公式、格式和数据分析 |
+| **docx** | 文档创建、编辑和格式化 |
+| **pptx** | 演示文稿创建、编辑和分析 |
+| **creating-financial-models** | DCF 分析、敏感性测试、蒙特卡洛模拟 |
+
+### 配置
+
+Skills 默认启用，从以下位置加载：
+1. 用户目录：`~/.ptc-agent/skills/`
+2. 项目目录：`.ptc-agent/skills/`（或 `skills/` 用于旧版）
+
+项目 Skills 会覆盖同名的用户 Skills。
+
+```yaml
+# config.yaml
+skills:
+  enabled: true
+  user_skills_dir: "~/.ptc-agent/skills"
+  project_skills_dir: ".ptc-agent/skills"
+```
+
+### 创建自定义 Skills
+
+每个 Skill 是一个包含 `SKILL.md` 文件的文件夹，文件中包含 YAML 前言和指令：
+
+```markdown
+---
+name: my-skill
+description: "清晰描述此 Skill 的功能和使用场景"
+---
+
+# My Skill
+
+Claude 激活此 Skill 时遵循的指令、工作流和示例。
+
+## 指南
+- 指南 1
+- 指南 2
+```
+
+可以在 `SKILL.md` 旁边捆绑其他文件（如 `reference.md`、脚本），并根据需要引用。Skills 会上传到沙箱的 `/home/daytona/skills/<skill-name>/` 目录。
+
+详细指南请参阅 [Anthropic 的 Skill 编写最佳实践](https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills)。
 
 ## 快速开始
 
@@ -318,11 +388,11 @@ ptc-agent list               # 列出可用的 Agent
 计划中的功能和改进：
 
 - [x] PTC Agent CLI 版本
-- [ ] 用于自动化测试的 CI/CD 流水线
+- [x] Agent Skills 支持（[agentskills.io](https://agentskills.io) 开放标准）
+- [x] 用于自动化测试的 CI/CD 流水线
 - [ ] 更多 MCP 服务器集成 / 更多示例 Notebook
 - [ ] 性能基准测试和优化
 - [ ] 改进搜索工具以实现更高效的工具发现
-- [ ] Claude skill 集成
 
 ## 贡献
 

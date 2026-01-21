@@ -56,8 +56,9 @@ User Task
 ## What's New
 
 - **Interactive CLI** - New `ptc-agent` command for terminal-based interaction with session persistence, plan mode, themes, and rich UI
-- **Background Subagent Execution** - Subagents now run asynchronously using a "fire and collect" pattern, giving the agent proactive control over dispatched tasks. Results are automatically returned to the agent upon completion, even without explicitly calling `wait()`
-- **Task Monitoring** - New `wait()` and `task_progress()` tools for monitoring and collecting background task results
+- **Background Subagent Execution** - Subagents run asynchronously with Task IDs (Task-1, Task-2, etc.). The main agent continues working while subagents execute in parallel. Completed results are cached and the agent is notified to retrieve them via `task_output()`
+- **Task Monitoring** - `wait()` blocks until task(s) complete; `task_output()` retrieves results or shows progress
+- **Agent Skills** - Extensible capabilities via the open [Agent Skills](https://agentskills.io) standard
 - **Vision/Multimodal Support** - New `view_image` tool enables vision-capable LLMs to analyze images from URLs, base64 data, or sandbox files
 
 
@@ -66,6 +67,7 @@ User Task
 - **Universal MCP Support** - Auto-converts any MCP server tools to Python functions
 - **Progressive Tool Discovery** - Tools discovered on-demand; avoids large number of tokens of upfront tool definitions
 - **Custom MCP Upload** - Deploy Python MCP implementations directly into sandbox sessions
+- **Agent Skills** - Skills for custom workflows
 - **Enhanced File Tools** - Refined glob, grep and other file operation tools optimized for sandbox environment
 - **Daytona Backend** - Secure code execution with filesystem isolation and snapshot support
 - **Auto Image Upload** - Charts and images auto-uploaded to cloud storage (Cloudflare R2, AWS S3, Alibaba OSS)
@@ -90,6 +92,13 @@ User Task
 │           ├── display/       # Rich terminal rendering
 │           ├── input/         # Prompt, completers, file mentions
 │           └── streaming/     # Tool approval, execution
+│
+├── skills/                    # Demo skills (from Anthropic)
+│   ├── pdf/                   # PDF manipulation
+│   ├── xlsx/                  # Spreadsheet operations
+│   ├── docx/                  # Document creation
+│   ├── pptx/                  # Presentation creation
+│   └── creating-financial-models/  # Financial modeling
 │
 ├── mcp_servers/               # Demo MCP server implementations
 │   ├── yfinance_mcp_server.py
@@ -125,7 +134,7 @@ The agent has access to native tools plus middleware capabilities from [deep-age
 | Middleware | Description | Tools Provided |
 |------------|-------------|----------------|
 | **SubagentsMiddleware** | Delegates specialized tasks to sub-agents with isolated execution | `task()` |
-| **BackgroundSubagentMiddleware** | Async subagent execution with fire and collect pattern | `wait()`, `task_progress()` |
+| **BackgroundSubagentMiddleware** | Async subagent execution with background tasks and notification-based collection | `wait()`, `task_output()` |
 | **ViewImageMiddleware** | Injects images into conversation for multimodal LLMs | `view_image()` |
 | **FilesystemMiddleware** | File operations | `read_file`, `write_file`, `edit_file`, `glob`, `grep`, `ls` |
 | **TodoListMiddleware** | Task planning and progress tracking (auto-enabled) | `write_todos` |
@@ -135,7 +144,13 @@ The agent has access to native tools plus middleware capabilities from [deep-age
 - `research` - Web search with Tavily + think tool for strategic reflection
 - `general-purpose` - Full execute_code, filesystem, and vision tools for complex multi-step tasks
 
-Subagents run in the background by default - the main agent can continue working while delegated tasks execute asynchronously.
+**Background Execution Model:**
+When the agent calls `task()`, subagents are assigned sequential IDs (Task-1, Task-2, etc.) and run in the background. The main agent:
+1. Receives immediate confirmation with the Task ID
+2. Continues with other work while subagents execute in parallel
+3. Gets notified when tasks complete
+4. Calls `task_output()` to retrieve cached results
+5. Uses `wait(task_number=N)` to block for specific tasks if needed
 
 ## MCP Integration
 
@@ -188,6 +203,61 @@ summary = {"mean": df["close"].mean(), "volatility": df["close"].std()}
 # Only summary returns to model
 print(summary)
 ```
+
+## Skills
+
+[Agent Skills](https://agentskills.io) is an open standard by Anthropic for packaging domain expertise into reusable folders of instructions and resources. Skills load dynamically via **progressive disclosure** - only metadata at startup, full content on-demand
+
+### Included Demo Skills
+
+Skills from [anthropics/skills](https://github.com/anthropics/skills) are included for demonstration:
+
+| Skill | Description |
+|-------|-------------|
+| **pdf** | PDF manipulation - extract text/tables, create, merge/split, fill forms |
+| **xlsx** | Spreadsheet creation with formulas, formatting, and data analysis |
+| **docx** | Document creation, editing, and formatting |
+| **pptx** | Presentation creation, editing, and analysis |
+| **creating-financial-models** | DCF analysis, sensitivity testing, Monte Carlo simulations |
+
+### Configuration
+
+Skills are enabled by default and loaded from:
+1. User directory: `~/.ptc-agent/skills/`
+2. Project directory: `.ptc-agent/skills/` (or `skills/` for legacy)
+
+Project skills override user skills when names conflict.
+
+```yaml
+# config.yaml
+skills:
+  enabled: true
+  user_skills_dir: "~/.ptc-agent/skills"
+  project_skills_dir: ".ptc-agent/skills"
+```
+
+### Creating Custom Skills
+
+Each skill is a folder with a `SKILL.md` file containing YAML frontmatter and instructions:
+
+```markdown
+---
+name: my-skill
+description: "Clear description of what this skill does and when to use it"
+---
+
+# My Skill
+
+Instructions, workflows, and examples that Claude follows when this skill is active.
+
+## Guidelines
+- Guideline 1
+- Guideline 2
+```
+
+Additional files (e.g., `reference.md`, scripts) can be bundled alongside `SKILL.md` and referenced as needed. Skills are uploaded to the sandbox at `/home/daytona/skills/<skill-name>/`.
+
+For detailed guidance, see [Anthropic's skill authoring best practices](https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills).
 
 ## Getting Started
 
@@ -317,11 +387,11 @@ For complete CLI documentation including all options, commands, keyboard shortcu
 Planned features and improvements:
 
 - [x] CLI Version for PTC Agent
-- [ ] CI/CD pipeline for automated testing
+- [x] Agent Skills support ([agentskills.io](https://agentskills.io) open standard)
+- [x] CI/CD pipeline for automated testing
 - [ ] Additional MCP server integrations / More example notebooks
 - [ ] Performance benchmarks and optimizations
 - [ ] Improved search tool for smoother tool discovery
-- [ ] Claude skill integration
 
 ## Contributing
 

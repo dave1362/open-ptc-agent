@@ -4,6 +4,27 @@ All notable changes to Open PTC Agent are documented here.
 
 Repository: https://github.com/Chen-zexi/open-ptc-agent
 
+## [Jan 9-15, 2026]
+
+### Added
+- Agent Skills support with open [agentskills.io](https://agentskills.io) standard - extensible capabilities via skill folders ([2081eff](https://github.com/Chen-zexi/open-ptc-agent/commit/2081eff))
+- Demo skills from Anthropic: pdf, xlsx, docx, pptx, creating-financial-models ([f032b42](https://github.com/Chen-zexi/open-ptc-agent/commit/f032b42))
+- Sandbox timeout reconnection stability improvements ([edb3e13](https://github.com/Chen-zexi/open-ptc-agent/commit/edb3e13))
+- Improved error handling for CLI and view_image middleware ([8e15c60](https://github.com/Chen-zexi/open-ptc-agent/commit/8e15c60), [8f012c7](https://github.com/Chen-zexi/open-ptc-agent/commit/8f012c7))
+
+### Changed
+- Migrated to AsyncDaytona with async-native filesystem calls ([b28ff01](https://github.com/Chen-zexi/open-ptc-agent/commit/b28ff01))
+- Refactored `task_progress()` tool to `task_output()` with improved subagent coordination ([31c30a3](https://github.com/Chen-zexi/open-ptc-agent/commit/31c30a3))
+- CLI interrupt command changed from Ctrl+C to Esc; improved subagent UI ([d88b441](https://github.com/Chen-zexi/open-ptc-agent/commit/d88b441))
+- Hidden streaming messages for subagents with improved result UI ([5db174c](https://github.com/Chen-zexi/open-ptc-agent/commit/5db174c))
+- Updated GLM and Minimax to latest models ([9991351](https://github.com/Chen-zexi/open-ptc-agent/commit/9991351))
+- Changed Claude Code linting to pre-commit command ([085b020](https://github.com/Chen-zexi/open-ptc-agent/commit/085b020))
+
+### Fixed
+- Duplicate human message when agent is reinvoked from waiting room ([13273d6](https://github.com/Chen-zexi/open-ptc-agent/commit/13273d6))
+- MCP patterns now resolved from host environment at generation time ([fe1b46d](https://github.com/Chen-zexi/open-ptc-agent/commit/fe1b46d))
+- CI tests updated to reflect sandbox changes ([085b020](https://github.com/Chen-zexi/open-ptc-agent/commit/085b020))
+
 ## [Dec 8-9, 2025]
 
 ### Breaking Changes
